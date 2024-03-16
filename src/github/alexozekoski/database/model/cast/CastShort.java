@@ -17,14 +17,10 @@ import java.util.List;
  *
  * @author alexo
  */
-public class CastShort extends CastPrimitive<Short> {
-
-    public CastShort() {
-        super(Short.class);
-    }
+public class CastShort extends CastPrimitive {
 
     @Override
-    public Short cast(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
+    public Object sqlToField(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
         if (sqlvalue == null) {
             return null;
         }
@@ -38,7 +34,7 @@ public class CastShort extends CastPrimitive<Short> {
     }
 
     @Override
-    public Short cast(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
+    public Object jsonToField(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
         if (value.isJsonNull()) {
             return null;
         }
@@ -46,13 +42,13 @@ public class CastShort extends CastPrimitive<Short> {
     }
 
     @Override
-    public JsonElement json(Model model, Field field, Class fieldType, Short obValue) throws Exception {
-        return obValue == null ? JsonNull.INSTANCE : new JsonPrimitive(obValue);
+    public JsonElement fieldToJson(Model model, Field field, Class fieldType, Object obValue) throws Exception {
+        return obValue == null ? JsonNull.INSTANCE : new JsonPrimitive((short)obValue);
     }
 
     @Override
     public String dataType(Field field, Class fieldType, Database database) throws Exception {
-        return fieldType.isArray() ? super.dataType(field, fieldType, database) : database.getMigrationType().smallint();
+        return arrayOrList(field, database.getMigrationType().smallint(), database);
     }
 
 }

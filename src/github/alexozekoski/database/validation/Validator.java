@@ -5,10 +5,18 @@
  */
 package github.alexozekoski.database.validation;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import github.alexozekoski.database.Database;
-import github.alexozekoski.database.model.ModelSerial;
+import github.alexozekoski.database.Log;
+import github.alexozekoski.database.model.Column;
+import github.alexozekoski.database.model.Model;
+import github.alexozekoski.database.model.ModelUtil;
+import java.lang.reflect.Array;
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  *
@@ -16,44 +24,130 @@ import java.lang.reflect.Field;
  */
 public class Validator {
 
-    public static JsonObject validField(Validation validation, Field field, Object model, Object value, Database database) throws IllegalArgumentException, IllegalAccessException, InstantiationException, Exception {
-        JsonObject json = new JsonObject();
-        if (validation.required()) {
-            CustomValidation val = new Required();
-            if (!val.validate(model, value, field)) {
-                json.add(Integer.toString(val.code(model, value, field)), val.message(model, value, field));
+    public static final List<Validation> VALIDATIONS = new ArrayList();
+    
+
+    static {
+        VALIDATIONS.add(new ColumnValidation());
+        VALIDATIONS.add(new StringValidation());
+        VALIDATIONS.add(new PrimitiveValidation());
+        VALIDATIONS.add(new BooleanValidation());
+        VALIDATIONS.add(new CustomValidation());
+    }
+
+    public static JsonObject validate(Model model, String... columns) {
+        Field[] fields = ModelUtil.getValidateColumns(model.getClass());
+        JsonObject validation = new JsonObject();
+        Validator validator = new Validator(model);
+        List<String> list = columns == null || columns.length == 0 ? null : Arrays.asList(columns);
+        for (Field field : fields) {
+            Column column = field.getAnnotation(Column.class);
+            String key = column.name().isEmpty() ? column.value() : column.name();
+            if (list == null || list.contains(key)) {
+                validator.getInvalids().clear();
+                validator.setField(field);
+                validator.setColumn(column);
+                if (!validator.validate()) {
+                    validation.add(key, validator.toJson());
+                }
             }
         }
-        if (!validation.exist().equals(ModelSerial.class)) {
-            CustomValidation val = new Exist(database, validation.exist());
-            if (!val.validate(model, value, field)) {
-                json.add(Integer.toString(val.code(model, value, field)), val.message(model, value, field));
+        return validation.keySet().isEmpty() ? null : validation;
+    }
+
+    private List<Invalid> invalids = new ArrayList<>();
+
+    private Field field = null;
+
+    private Model model;
+
+    private Column column = null;
+
+    public Validator(Model model) {
+        this.model = model;
+    }
+
+    public List<Invalid> getInvalids() {
+        return invalids;
+    }
+
+    public void setInvalids(List<Invalid> invalids) {
+        this.invalids = invalids;
+    }
+
+    public void addInvalid(int code, String message) {
+        addInvalid(code, message, null);
+    }
+    
+     public void addInvalid(Invalid invalid) {
+        this.invalids.add(invalid);
+    }
+
+    public void addInvalid(int code, String message, JsonElement extra) {
+        invalids.add(new Invalid(code, message, extra));
+    }
+
+    public boolean validate() {
+        try {
+            Object value = field.get(model);
+            if (value != null && (value.getClass().isArray() || List.class.isInstance(value))) {
+                if (value.getClass().isArray()) {
+                    int length = Array.getLength(value);
+                    for (int i = 0; i < length; i++) {
+                        Object valueUni = Array.get(value, i);
+                        for (Validation validation : VALIDATIONS) {
+                            validation.valid(model, field, column, valueUni, this);
+                        }
+                    }
+                } else {
+                    List values = (List) value;
+                    for (Object valueUni : values) {
+                        for (Validation validation : VALIDATIONS) {
+                            validation.valid(model, field, column, valueUni, this);
+                        }
+                    }
+                }
+            } else {
+                for (Validation validation : VALIDATIONS) {
+                    validation.valid(model, field, column, value, this);
+                }
             }
+
+        } catch (Exception ex) {
+            Log.printError(ex);
         }
-        if (validation.unique()) {
-            CustomValidation val = new Unique(database);
-            if (!val.validate(model, value, field)) {
-                json.add(Integer.toString(val.code(model, value, field)), val.message(model, value, field));
-            }
+        return invalids.isEmpty();
+    }
+
+    public JsonArray toJson() {
+        JsonArray json = new JsonArray();
+        for (Invalid invalid : invalids) {
+            json.add(invalid.toJson());
         }
-        if (!Double.isNaN(validation.min())) {
-            CustomValidation val = new Min(validation.min());
-            if (!val.validate(model, value, field)) {
-                json.add(Integer.toString(val.code(model, value, field)), val.message(model, value, field));
-            }
-        }
-        if (!Double.isNaN(validation.max())) {
-            CustomValidation val = new Max(validation.max());
-            if (!val.validate(model, value, field)) {
-                json.add(Integer.toString(val.code(model, value, field)), val.message(model, value, field));
-            }
-        }
-        for (Class<? extends CustomValidation> ob : validation.custom()) {
-            CustomValidation custom = ob.newInstance();
-            if (!custom.validate(model, value, field)) {
-                json.add(Integer.toString(custom.code(model, value, field)), custom.message(model, value, field));
-            }
-        }
-        return json.keySet().size() > 0 ? json : null;
+        return json;
+    }
+
+    public Field getField() {
+        return field;
+    }
+
+    public void setField(Field field) {
+        this.field = field;
+    }
+
+    public Model getModel() {
+        return model;
+    }
+
+    public void setModel(Model model) {
+        this.model = model;
+    }
+
+    public Column getColumn() {
+        return column;
+    }
+
+    public void setColumn(Column column) {
+        this.column = column;
     }
 }

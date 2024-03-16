@@ -5,6 +5,7 @@
  */
 package github.alexozekoski.database.query;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import github.alexozekoski.database.model.Model;
@@ -28,20 +29,30 @@ public class QueryModel<M extends Model<M>> extends Query<QueryModel<M>> {
 
     private Class<? extends Model<M>> classe;
 
-    private Database database;
-
     public QueryModel(Class<? extends Model<M>> classe, Database database) {
         super(database, ModelUtil.getTable(classe));
-        this.database = database;
+        Join[] joins = ModelUtil.getJoinColumn(classe, database);
+        for (Join join : joins) {
+            getClauses().add(join);
+        }
         setTable(ModelUtil.getTable(classe));
         setClasse(classe);
     }
 
     public ModelList<M> get() {
-        return get(new ModelList(classe));
+        try {
+            return tryGet(new ModelList(classe));
+        } catch (Exception ex) {
+            Log.printError(ex);
+        }
+        return null;
     }
 
-    public ModelList<M> get(ModelList<M> list) {
+    public ModelList<M> tryGet() throws IllegalAccessException, IllegalArgumentException, SQLException {
+        return tryGet(new ModelList(classe));
+    }
+
+    public ModelList<M> tryGet(ModelList<M> list) throws IllegalAccessException, IllegalArgumentException, SQLException {
 
         int pos = 0;
         ResultSet resultado = null;
@@ -56,22 +67,28 @@ public class QueryModel<M extends Model<M>> extends Query<QueryModel<M>> {
                 M model = novo ? (M) Model.newInstance(classe) : list.get(pos);
                 model.setDatabase(getDatabase());
                 model.onSelect();
-                if (model.getAction() != null) {
-                    model.getAction().onSelect(model);
-                }
-                model.setDatabase(getDatabase());
+//                if (model.getAction() != null) {
+//                    model.getAction().onSelect(model);
+//                }
+
                 model.fill(resultado);
                 model.afterSelect();
-                if (model.getAction() != null) {
-                    model.getAction().afterSelect(model);
-                }
+//                if (model.getAction() != null) {
+//                    model.getAction().afterSelect(model);
+//                }
                 if (novo) {
                     list.add(model);
                 }
                 pos++;
             }
-        } catch (Exception e) {
+        } catch (IllegalAccessException | IllegalArgumentException | SQLException e) {
             Log.printError(e);
+            try {
+                resultado.close();
+            } catch (Exception ex) {
+                Log.printError(ex);
+            }
+            throw e;
         }
         try {
             resultado.close();
@@ -85,12 +102,24 @@ public class QueryModel<M extends Model<M>> extends Query<QueryModel<M>> {
     }
 
     @Override
+    public long tryCount() throws SQLException {
+        long v = super.tryCount();
+        return v;
+    }
+
+    @Override
     public long tryCountDistinct(String column) throws SQLException {
         Field[] fields = ModelUtil.getAllColumns(classe);
         if (canSelectColumn(column, fields) != null) {
-            return super.tryCountDistinct(column);
+            long v = super.tryCountDistinct(column);
+            return v;
         }
         return -1;
+    }
+
+    public M get(Long id) {
+        where("id", id);
+        return first();
     }
 
     public M first() {
@@ -98,8 +127,9 @@ public class QueryModel<M extends Model<M>> extends Query<QueryModel<M>> {
         return list.isEmpty() ? null : list.get(0);
     }
 
-    public Database getDatabase() {
-        return database;
+    public M tryFirst() throws IllegalAccessException, IllegalArgumentException, SQLException {
+        ModelList<M> list = limit(1).tryGet();
+        return list.isEmpty() ? null : list.get(0);
     }
 
     private Field canSelectColumn(String column, Field[] fields) {
@@ -120,59 +150,147 @@ public class QueryModel<M extends Model<M>> extends Query<QueryModel<M>> {
         return null;
     }
 
-    public QueryModel<M> where(JsonObject json) throws IllegalArgumentException, IllegalAccessException {
-        try {
-            Field[] fields = ModelUtil.getAllColumns(classe);
-            List<Model> stack = new ArrayList();
-            for (String key : json.keySet()) {
-                Field field = canSelectColumn(key, fields);
-                if (field != null) {
+    private boolean stackJsonObject(Field field, github.alexozekoski.database.model.Column column, Field[] fields, List<Model> stack, JsonObject js, boolean forceAndFirst) {
+        Object value = ModelUtil.getQuery(null, stack, field, js.getAsJsonObject().get("value"), true);
+        boolean and = true;
+        String operator = null;
 
-                    github.alexozekoski.database.model.Column column = field.getAnnotation(github.alexozekoski.database.model.Column.class);
-                    if (column != null) {
-                        JsonElement js = json.get(key);
-                        Object value;
-                        String operator = "=";
-                        boolean and = true;
-                        if (js.isJsonObject()) {
-                            value = ModelUtil.getField(null, stack, field, js.getAsJsonObject().get("value"));
-                            JsonElement row = js.getAsJsonObject().get("row");
-                            if (row != null && !row.isJsonNull()) {
-                                if (row.getAsString().toLowerCase().equals("or")) {
-                                    and = false;
-                                }
-                            }
-                            JsonElement op = js.getAsJsonObject().get("operator");
-                            if (op != null && !op.isJsonNull()) {
-                                operator = op.getAsString();
-                            }
+        JsonElement row = js.getAsJsonObject().get("row");
+        if (row != null && !row.isJsonNull()) {
+            if (row.getAsString().toLowerCase().equals("or")) {
+                and = false;
+            }
+        }
+        JsonElement op = js.getAsJsonObject().get("operator");
+        if (op != null && !op.isJsonNull()) {
+            operator = op.getAsString();
+        }
+        if (operator == null) {
+            if (value == null) {
+                operator = "IS NULL";
+            } else {
+                operator = "=";
+            }
+        }
+
+        if (and || forceAndFirst) {
+            forceAndFirst = false;
+            where(column.value(), operator, value);
+        } else {
+            orWhere(column.value(), operator, value);
+        }
+
+        return forceAndFirst;
+    }
+
+    private boolean stackJsonArray(boolean and, Field field, github.alexozekoski.database.model.Column column, Field[] fields, List<Model> stack, JsonArray js, boolean forceAndFirst) {
+        List<Object> values = new ArrayList();
+        for (int i = 0; i < js.size(); i++) {
+            JsonElement ob = js.get(i);
+            if (ob.isJsonObject()) {
+                forceAndFirst = stackJsonObject(field, column, fields, stack, ob.getAsJsonObject(), forceAndFirst);
+            } else {
+                Object value = ModelUtil.getQuery(null, stack, field, ob, true);
+                values.add(value);
+            }
+        }
+        if (!values.isEmpty()) {
+            if (and || forceAndFirst) {
+                forceAndFirst = false;
+                whereInValues(column.value(), values);
+            } else {
+                orWhereInValues(column.value(), values);
+            }
+        }
+        return forceAndFirst;
+    }
+
+    private boolean stackWhere(Field[] fields, List<Model> stack, JsonObject json, boolean forceAndFirst) {
+        for (String key : json.keySet()) {
+            Field field = canSelectColumn(key, fields);
+            if (field != null) {
+
+                github.alexozekoski.database.model.Column column = field.getAnnotation(github.alexozekoski.database.model.Column.class);
+                if (column != null) {
+                    JsonElement js = json.get(key);
+                    String operator = "=";
+                    boolean and = true;
+                    if (js.isJsonObject()) {
+                        if (key.equals("()")) {
+                            openParentheses();
+                            forceAndFirst = stackWhere(fields, stack, js.getAsJsonObject(), forceAndFirst);
+                            closeParentheses();
                         } else {
-                            value = ModelUtil.getQuery(null, stack, field, json.get(key));
+                            forceAndFirst = stackJsonObject(field, column, fields, stack, js.getAsJsonObject(), forceAndFirst);
                         }
 
-                        if (value != null) {
-                            if (and) {
-                                where(column.value(), operator, value);
-                            } else {
-                                orWhere(column.value(), operator, value);
-                            }
+                    } else if (js.isJsonArray()) {
+                        forceAndFirst = stackJsonArray(and, field, column, fields, stack, js.getAsJsonArray(), forceAndFirst);
+                    } else {
+                        Object value = ModelUtil.getQuery(null, stack, field, json.get(key), true);
+                        if (and || forceAndFirst) {
+                            forceAndFirst = false;
+                            where(column.value(), operator, value);
+                        } else {
+                            orWhere(column.value(), operator, value);
                         }
                     }
                 }
             }
+        }
+        return forceAndFirst;
+    }
+
+    public QueryModel<M> where(JsonObject json, boolean forceFirstAnd) throws IllegalArgumentException, IllegalAccessException {
+        try {
+            Field[] fields = ModelUtil.getAllColumns(classe);
+            List<Model> stack = new ArrayList();
+            stackWhere(fields, stack, json, forceFirstAnd);
         } catch (Exception e) {
             Log.printError(e);
         }
         return this;
     }
 
-    public QueryModel<M> limit(JsonObject json) throws IllegalArgumentException, IllegalAccessException {
-        try {
-            if (json.has("offset")) {
-                offset(json.get("offset").getAsLong());
+    public QueryModel<M> select(JsonArray columns) {
+        if (columns.size() == 0) {
+            return this;
+        }
+        Field[] fields = ModelUtil.getAllColumns(classe, false, false, true, false, false);
+        clearSelects();
+        for (int i = 0; i < columns.size(); i++) {
+            String col = columns.get(i).getAsString();
+
+            for (Field field : fields) {
+                github.alexozekoski.database.model.Column column = field.getAnnotation(github.alexozekoski.database.model.Column.class);
+                if (column.value().equals(col)) {
+                    select(col);
+                }
             }
-            if (json.has("limit")) {
-                limit(json.get("limit").getAsLong());
+        }
+        return this;
+    }
+
+    public QueryModel<M> limit(long max, JsonObject json) throws IllegalArgumentException, IllegalAccessException {
+        try {
+            JsonElement offset = json.get("offset");
+            if (offset != null && offset.isJsonPrimitive()) {
+                offset(offset.getAsLong());
+            }
+
+            JsonElement limit = json.get("limit");
+            long lim = -1;
+            if (limit != null && limit.isJsonPrimitive()) {
+                lim = limit.getAsLong();
+            }
+
+            if (max > 0) {
+                if (lim == -1 || lim > max) {
+                    lim = max;
+                }
+            }
+            if (lim != -1) {
+                limit(lim);
             }
         } catch (Exception e) {
             Log.printError(e);
@@ -214,7 +332,7 @@ public class QueryModel<M extends Model<M>> extends Query<QueryModel<M>> {
     }
 
     public void setDefaultColumns() {
-        Field[] fields = ModelUtil.getAllColumns(classe, false, false, true, false);
+        Field[] fields = ModelUtil.getAllColumns(classe, false, false, true, false, false);
         for (Field field : fields) {
             github.alexozekoski.database.model.Column column = field.getAnnotation(github.alexozekoski.database.model.Column.class);
             select(column.value());

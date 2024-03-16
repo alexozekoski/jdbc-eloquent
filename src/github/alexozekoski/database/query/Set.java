@@ -5,6 +5,7 @@
  */
 package github.alexozekoski.database.query;
 
+import github.alexozekoski.database.migration.MigrationType;
 import java.util.List;
 
 /**
@@ -15,10 +16,12 @@ public class Set implements Clause {
 
     private String name;
     private Object value;
+    private final MigrationType migrationType;
 
-    public Set(String name, Object value) {
+    public Set(String name, Object value, MigrationType migrationType) {
         this.name = name;
         this.value = value;
+        this.migrationType = migrationType;
     }
 
 //    private String arrayValue(Object array) {
@@ -46,7 +49,7 @@ public class Set implements Clause {
 //    }
     @Override
     public String query(char type) {
-        return type == 'U' ? "\"" + name + "\" = ?" : "\"" + name + "\"";
+        return type == 'U' ? migrationType.carrot() + name + migrationType.carrot() + " = ?" : migrationType.carrot() + name + migrationType.carrot();
     }
 
     @Override
@@ -77,5 +80,10 @@ public class Set implements Clause {
     @Override
     public void setTable(String table) {
 
+    }
+
+    @Override
+    public boolean hasValue(char type) {
+        return true;
     }
 }

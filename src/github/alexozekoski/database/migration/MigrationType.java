@@ -44,6 +44,10 @@ public interface MigrationType {
     public String smallint();
 
     public String increment();
+    
+    public String byteArray();
+    
+    public String blob();
 
     public String dropTable(String table);
 
@@ -57,12 +61,17 @@ public interface MigrationType {
 
     public String dropIndex(String index, String table, String... columns);
 
-    public String createForeignKey(String index, String table, String column);
+//    public String createForeignKey(String index, String table, String column);
+//
+//    public String dropForeignKey(String index, String table, String column);
+    public String castTypeSQL(String column, String type, String typeName, int dataType, long size, long precision, long decimal, boolean nullable, boolean autoincrement, String defaultValue);
 
-    public String dropForeignKey(String index, String table, String column);
+    public Column castTypeSQL(String column, String type, String typeName, int dataType, long size, long precision, long decimal, boolean nullable, boolean autoincrement, String defaultValue, String foreignTable, String foreignColumn);
 
-    public String castTypeSQL(String column, String type, int dataType, long size, long precision, long decimal, boolean nullable, boolean autoincrement, String defaultValue);
+    public String addColumn(Table table, Column[] cols);
 
-    public Column castTypeSQL(String column, String type, int dataType, long size, long precision, long decimal, boolean nullable, boolean autoincrement, String defaultValue, String foreignTable, String foreignColumn);
+    public String dropColumn(Table table, Column[] cols);
+    
+    public String carrot();
 //    public String castTypeSQL(String column, String type, long size, long precision, long decimal, boolean nullable, boolean autoincrement, String defaultValue);
 }

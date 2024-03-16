@@ -6,6 +6,8 @@
 package github.alexozekoski.database;
 
 import com.google.gson.JsonObject;
+import github.alexozekoski.database.migration.MigrationType;
+import github.alexozekoski.database.migration.MySQLMigration;
 
 /**
  *
@@ -14,6 +16,10 @@ import com.google.gson.JsonObject;
 public class MySQL extends Database {
 
     public static final String JDBC = "mysql";
+
+    public static final String NAME = "MySQL";
+
+    public static final MigrationType MIGRATION_TYPE = new MySQLMigration();
 
     public MySQL(JsonObject json) {
         super(json);
@@ -26,5 +32,15 @@ public class MySQL extends Database {
 
     public MySQL() {
         setJdbc(JDBC);
+    }
+
+    @Override
+    public MigrationType getMigrationType() {
+        return MIGRATION_TYPE;
+    }
+
+    @Override
+    public String getName() {
+        return NAME;
     }
 }

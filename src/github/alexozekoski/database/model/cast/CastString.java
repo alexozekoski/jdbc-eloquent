@@ -9,6 +9,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonPrimitive;
 import github.alexozekoski.database.Database;
+import github.alexozekoski.database.model.Column;
 import github.alexozekoski.database.model.Model;
 import java.lang.reflect.Field;
 import java.util.List;
@@ -17,14 +18,10 @@ import java.util.List;
  *
  * @author alexo
  */
-public class CastString extends CastPrimitive<String> {
-
-    public CastString() {
-        super(String.class);
-    }
+public class CastString extends CastPrimitive {
 
     @Override
-    public String cast(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
+    public Object sqlToField(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
         if (sqlvalue == null) {
             return null;
         } else {
@@ -33,12 +30,12 @@ public class CastString extends CastPrimitive<String> {
     }
 
     @Override
-    public JsonElement json(Model model, Field field, Class fieldType, String obValue) throws Exception {
-        return obValue == null ? JsonNull.INSTANCE : new JsonPrimitive(obValue);
+    public JsonElement fieldToJson(Model model, Field field, Class fieldType, Object obValue) throws Exception {
+        return obValue == null ? JsonNull.INSTANCE : new JsonPrimitive((String) obValue);
     }
 
     @Override
-    public String cast(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
+    public Object jsonToField(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
         if (value.isJsonNull()) {
             return null;
         }
@@ -47,7 +44,11 @@ public class CastString extends CastPrimitive<String> {
 
     @Override
     public String dataType(Field field, Class fieldType, Database database) throws Exception {
-        return fieldType.isArray() ? super.dataType(field, fieldType, database) : database.getMigrationType().varchar(255);
+        Column column = field.getAnnotation(Column.class);
+        if (column.text()) {
+            return database.getMigrationType().text();
+        }
+        return arrayOrList(field, database.getMigrationType().varchar(column.varchar()> 0 ? column.varchar() : Model.DEFAULT_VARCHAR_SIZE), database);
     }
 
 }

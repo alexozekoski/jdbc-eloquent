@@ -7,23 +7,19 @@ package github.alexozekoski.database;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
-import github.alexozekoski.database.model.Column;
 import github.alexozekoski.database.model.Model;
-import github.alexozekoski.database.model.cast.Cast;
 import github.alexozekoski.database.migration.Table;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.PreparedStatement; 
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.lang.reflect.Field;
 import github.alexozekoski.database.migration.MigrationType;
 import github.alexozekoski.database.model.ModelUtil;
-import static github.alexozekoski.database.model.ModelUtil.CASTS;
-import github.alexozekoski.database.model.Serial;
 import github.alexozekoski.database.model.cast.CastUtil;
 import github.alexozekoski.database.query.Query;
 import github.alexozekoski.database.query.QueryModel;
@@ -31,8 +27,11 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.sql.DatabaseMetaData;
+import java.sql.Savepoint;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Properties;
 
 /**
  *
@@ -47,7 +46,16 @@ public abstract class Database {
     private String password;
     private String database;
     private Integer port;
+
+    private Properties props;
+
+    public static boolean FORCE_DEBUGGER = false;
+
+    public static DatabaseAction DEFAULT_ACTION = null;
+
     private boolean debugger = false;
+
+    private boolean autoreconnect = true;
 
     static {
 
@@ -56,6 +64,8 @@ public abstract class Database {
             Class.forName("com.mysql.jdbc.Driver");
             Class.forName("org.firebirdsql.jdbc.FirebirdDriver");
             Class.forName("org.sqlite.JDBC");
+            Class.forName("oracle.jdbc.driver.OracleDriver");
+            Class.forName("org.mariadb.jdbc.Driver");
         } catch (ClassNotFoundException ex) {
             Log.printError(ex);
         }
@@ -73,7 +83,7 @@ public abstract class Database {
      * @param database connection database or schema. example publix
      * @return returns null if jdbc name is not listed.
      */
-    public static Database connect(String jdbc, String host, Integer port, String user, String password, String database) {
+    public static Database create(String jdbc, String host, Integer port, String user, String password, String database) {
         switch (jdbc) {
             case PostgreSQL.JDBC: {
                 return new PostgreSQL(host, port, user, password, database);
@@ -87,29 +97,14 @@ public abstract class Database {
             case FirebirdSQL.JDBC: {
                 return new FirebirdSQL(host, port, user, password, database);
             }
-        }
-        return null;
-    }
-
-    public PreparedStatement createPreparedStatement(String query, boolean returnKeys, Object... param) throws SQLException {
-
-        PreparedStatement stmt;
-        if (returnKeys) {
-            stmt = con.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
-        } else {
-            stmt = con.prepareStatement(query);
-        }
-        stmt.closeOnCompletion();
-
-        if (param != null) {
-            for (int i = 0; i < param.length; i++) {
-                stmt.setObject(i + 1, param[i]);
+            case Oracle.JDBC: {
+                return new Oracle(host, port, user, password, database);
+            }
+            case MariaDB.JDBC: {
+                return new MariaDB(host, port, user, password, database);
             }
         }
-        if (debugger) {
-            System.out.println(query);
-        }
-        return stmt;
+        return null;
     }
 
     /**
@@ -119,7 +114,7 @@ public abstract class Database {
      * password, database
      * @return returns null if jdbc name is not listed.
      */
-    public static Database connect(JsonObject json) {
+    public static Database create(JsonObject json) {
         switch (json.get("jdbc").getAsString()) {
             case PostgreSQL.JDBC: {
                 return new PostgreSQL(json);
@@ -133,15 +128,67 @@ public abstract class Database {
             case FirebirdSQL.JDBC: {
                 return new FirebirdSQL(json);
             }
+            case Oracle.JDBC: {
+                return new Oracle(json);
+            }
+            case MariaDB.JDBC: {
+                return new MariaDB(json);
+            }
         }
         return null;
     }
 
-    public Connection getCon() {
+    protected String queryToSqlString(String query, Statement statement, Object... param) {
+        String value = query;
+        for (Object param1 : param) {
+            value += "\t" + param1 + (param1 != null ? " " + param1.getClass() : "");
+        }
+        return value;
+    }
+
+    public PreparedStatement createPreparedStatement(String query, boolean returnKeys, Object... param) throws SQLException {
+        PreparedStatement stmt;
+        if (returnKeys) {
+            stmt = con.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
+        } else {
+            stmt = con.prepareStatement(query);
+        }
+        stmt.closeOnCompletion();
+
+        if (param != null) {
+            for (int i = 0; i < param.length; i++) {
+                stmt.setObject(i + 1, param[i]);
+            }
+        }
+        String value = queryToSqlString(query, stmt, param);
+        if (DEFAULT_ACTION != null) {
+            DEFAULT_ACTION.query(value, this);
+        }
+        if (debugger || FORCE_DEBUGGER) {
+            System.out.println(value);
+        }
+        return stmt;
+    }
+
+    public Statement createStatement(String query) throws SQLException {
+
+        Statement st = con.createStatement();
+        st.closeOnCompletion();
+        String value = queryToSqlString(query, st);
+        if (DEFAULT_ACTION != null) {
+            DEFAULT_ACTION.query(value, this);
+        }
+        if (debugger || FORCE_DEBUGGER) {
+            System.out.println(value);
+        }
+        return st;
+    }
+
+    public Connection getJdbcConnection() {
         return con;
     }
 
-    public void setCon(Connection con) {
+    public void setJdbcConnection(Connection con) {
         this.con = con;
     }
 
@@ -175,6 +222,9 @@ public abstract class Database {
         this.password = getAsString(json.get("password"));
         this.database = getAsString(json.get("database"));
         this.port = getAsInt(json.get("port"));
+        if (json.has("debugger")) {
+            setDebugger(json.get("debugger").getAsBoolean());
+        }
     }
 
     private String getAsString(JsonElement json) {
@@ -217,7 +267,7 @@ public abstract class Database {
         return database;
     }
 
-    public int getPort() {
+    public Integer getPort() {
         return port;
     }
 
@@ -225,9 +275,9 @@ public abstract class Database {
      * @param query SQL defaul query,
      * @return returns an array of json objects, not a safe method SQL inject
      */
-    public JsonArray executeAsJsonArray(String query) {
+    public JsonArray executeAsJson(String query) {
         try {
-            return tryExecuteAsJsonArray(query);
+            return tryExecuteAsJson(query);
         } catch (SQLException ex) {
             Log.printError(ex);
             return null;
@@ -239,7 +289,7 @@ public abstract class Database {
      * @return returns an array of json objects, not a safe method SQL inject
      * @throws java.sql.SQLException
      */
-    public JsonArray tryExecuteAsJsonArray(String query) throws SQLException {
+    public JsonArray tryExecuteAsJson(String query) throws SQLException {
         JsonObject ob = executeAsJsonObject(query);
         return ob != null ? ob.get("body").getAsJsonArray() : null;
     }
@@ -256,6 +306,14 @@ public abstract class Database {
         }
     }
 
+    public boolean tryReconnect() throws SQLException {
+        if (!isConnected() && con != null) {
+            tryConnect(props);
+            return true;
+        }
+        return false;
+    }
+
     /**
      * tries to connect to database, generates JDBC default error
      *
@@ -268,10 +326,31 @@ public abstract class Database {
     /**
      * tries to connect to database, generates JDBC default error
      *
+     * @throws java.sql.SQLException
+     */
+    public void tryConnect(Properties props) throws SQLException {
+        tryConnect(false, props);
+    }
+
+    /**
+     * tries to connect to database, generates JDBC default error
+     *
      * @param readOnly
      * @throws java.sql.SQLException
      */
     public void tryConnect(boolean readOnly) throws SQLException {
+        tryConnect(readOnly, null);
+    }
+
+    /**
+     * tries to connect to database, generates JDBC default error
+     *
+     * @param readOnly
+     * @param props
+     * @throws java.sql.SQLException
+     */
+    public void tryConnect(boolean readOnly, Properties props) throws SQLException {
+        this.props = props;
         String url = "jdbc:" + jdbc + ":";
 
         if (host != null && !host.isEmpty()) {
@@ -286,8 +365,24 @@ public abstract class Database {
         if (con != null && !con.isClosed()) {
             con.close();
         }
-        con = DriverManager.getConnection(url, user, password);
+        if (props != null) {
+
+            con = tryConnectWithProps(url, props);
+        } else {
+            con = DriverManager.getConnection(url, user, password);
+        }
         con.setReadOnly(readOnly);
+        con.setAutoCommit(false);
+    }
+
+    protected Connection tryConnectWithProps(String url, Properties props) throws SQLException {
+        if (!props.containsKey("user") && user != null) {
+            props.put("user", user);
+        }
+        if (!props.containsKey("password") && password != null) {
+            props.put("password", password);
+        }
+        return DriverManager.getConnection(url, props);
     }
 
     public void tryConnectOrCreateDatabase() throws SQLException {
@@ -326,6 +421,39 @@ public abstract class Database {
     public boolean connect(boolean readOnly) {
         try {
             tryConnect(readOnly);
+        } catch (SQLException e) {
+            Log.printError(e);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * tries to connect to database without generating error
+     *
+     * @param readOnly
+     * @param props
+     * @return false if not connected
+     */
+    public boolean connect(boolean readOnly, Properties props) {
+        try {
+            tryConnect(readOnly, props);
+        } catch (SQLException e) {
+            Log.printError(e);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * tries to connect to database without generating error
+     *
+     * @param props
+     * @return false if not connected
+     */
+    public boolean connect(Properties props) {
+        try {
+            tryConnect(props);
         } catch (SQLException e) {
             Log.printError(e);
             return false;
@@ -397,58 +525,42 @@ public abstract class Database {
     public JsonObject tryExecuteAsJsonObject(String query) throws SQLException {
         JsonArray json = new JsonArray();
         JsonArray head = new JsonArray();
-        ResultSet resultSet = execute(query);
+        ResultSet resultSet = tryExecute(query);
         if (resultSet != null) {
             try {
                 ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
-                int[] tipos = new int[resultSetMetaData.getColumnCount()];
                 for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
                     head.add(resultSetMetaData.getColumnLabel(col));
-                    //  String type = resultSetMetaData.getColumnClassName(col);
-//                  if(Number.class.isAssignableFrom(resultSetMetaData));;
-//                    if (type.equals(Integer.class.getCanonicalName()) || type.equals(int.class.getCanonicalName())
-//                            || type.equals(Byte.class.getCanonicalName()) || type.equals(byte.class.getCanonicalName())
-//                            || type.equals(Short.class.getCanonicalName()) || type.equals(short.class.getCanonicalName())
-//                            || type.equals(Long.class.getCanonicalName()) || type.equals(long.class.getCanonicalName())) {
-//                        tipos[col - 1] = 1;
-//                    } else if (type.equals(Float.class.getCanonicalName()) || type.equals(Float.class.getCanonicalName())
-//                            || type.equals(Double.class.getCanonicalName()) || type.equals(Double.class.getCanonicalName())) {
-//                        tipos[col - 1] = 2;
-//                    } else if (type.equals(Boolean.class.getCanonicalName()) || type.equals(boolean.class.getCanonicalName())) {
-//                        tipos[col - 1] = 3;
-//                    }
+
                 }
                 while (resultSet.next()) {
                     JsonObject linha = new JsonObject();
 
                     for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
                         Object value = resultSet.getObject(col);
-                        json.add(CastUtil.sqlToJson(value));
-//                        switch (tipos[col - 1]) {;
-//                            case 1:
-//                                linha.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getLong(col));
-//                                break;
-//                            case 2:
-//                                linha.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getDouble(col));
-//                                break;
-//                            case 3:
-//                                linha.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getBoolean(col));
-//                                break;
-//                            default:
-//                                linha.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getString(col));
-//                                break;
-//                        }
-
+                        if (value == null) {
+                            linha.add(resultSetMetaData.getColumnLabel(col), JsonNull.INSTANCE);
+                        } else if (Number.class.isInstance(value)) {
+                            linha.addProperty(resultSetMetaData.getColumnLabel(col), (Number) value);
+                        } else if (Boolean.class.isInstance(value)) {
+                            linha.addProperty(resultSetMetaData.getColumnLabel(col), (Boolean) value);
+                        } else if (Date.class.isInstance(value)) {
+                            linha.add(resultSetMetaData.getColumnLabel(col), CastUtil.toJson((Date) value));
+                        } else {
+                            linha.addProperty(resultSetMetaData.getColumnLabel(col), value.toString());
+                        }
                     }
                     json.add(linha);
                 }
             } catch (SQLException e) {
-                Log.printError(e);
+                resultSet.close();
+                throw e;
             }
+
             try {
                 resultSet.close();
             } catch (SQLException e) {
-                Log.printError(e);
+                throw e;
             }
         }
 
@@ -458,7 +570,7 @@ public abstract class Database {
         return ob;
     }
 
-    public JsonArray executeAsJsonArray(String query, Object... objects) {
+    public JsonArray executeAsJson(String query, Object... objects) {
         JsonObject ob = executeAsJsonObject(query, objects);
         return ob != null ? ob.get("body").getAsJsonArray() : null;
     }
@@ -501,39 +613,24 @@ public abstract class Database {
         if (resultSet != null) {
             try {
                 ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
-                int[] tipos = new int[resultSetMetaData.getColumnCount()];
                 for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
                     head.add(resultSetMetaData.getColumnLabel(col));
-                    String type = resultSetMetaData.getColumnClassName(col);
-                    if (type.equals(Integer.class.getCanonicalName()) || type.equals(int.class.getCanonicalName())
-                            || type.equals(Byte.class.getCanonicalName()) || type.equals(byte.class.getCanonicalName())
-                            || type.equals(Short.class.getCanonicalName()) || type.equals(short.class.getCanonicalName())
-                            || type.equals(Long.class.getCanonicalName()) || type.equals(long.class.getCanonicalName())) {
-                        tipos[col - 1] = 1;
-                    } else if (type.equals(Float.class.getCanonicalName()) || type.equals(Float.class.getCanonicalName())
-                            || type.equals(Double.class.getCanonicalName()) || type.equals(Double.class.getCanonicalName())) {
-                        tipos[col - 1] = 2;
-                    } else if (type.equals(Boolean.class.getCanonicalName()) || type.equals(boolean.class.getCanonicalName())) {
-                        tipos[col - 1] = 3;
-                    }
                 }
                 while (resultSet.next()) {
                     JsonObject linha = new JsonObject();
 
                     for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
-                        switch (tipos[col - 1]) {
-                            case 1:
-                                linha.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getLong(col));
-                                break;
-                            case 2:
-                                linha.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getDouble(col));
-                                break;
-                            case 3:
-                                linha.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getBoolean(col));
-                                break;
-                            default:
-                                linha.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getString(col));
-                                break;
+                        Object value = resultSet.getObject(col);
+                        if (value == null) {
+                            linha.add(resultSetMetaData.getColumnLabel(col), JsonNull.INSTANCE);
+                        } else if (Number.class.isInstance(value)) {
+                            linha.addProperty(resultSetMetaData.getColumnLabel(col), (Number) value);
+                        } else if (Boolean.class.isInstance(value)) {
+                            linha.addProperty(resultSetMetaData.getColumnLabel(col), (Boolean) value);
+                        } else if (Date.class.isInstance(value)) {
+                            linha.add(resultSetMetaData.getColumnLabel(col), CastUtil.toJson((Date) value));
+                        } else {
+                            linha.addProperty(resultSetMetaData.getColumnLabel(col), value.toString());
                         }
 
                     }
@@ -550,7 +647,6 @@ public abstract class Database {
                 throw e;
             }
         }
-
         JsonObject ob = new JsonObject();
         ob.add("head", head);
         ob.add("body", json);
@@ -581,16 +677,23 @@ public abstract class Database {
      */
     public ResultSet tryExecuteReturnigGeneratedKeys(String query) throws SQLException {
         try {
-            Statement stmt = con.createStatement();
+            Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
+            Statement stmt = createStatement(query);
             stmt.closeOnCompletion();
             ResultSet resultSet = null;
             try {
-                if (stmt.execute(query)) {
+                if (stmt.execute(query, Statement.RETURN_GENERATED_KEYS)) {
                     resultSet = stmt.getGeneratedKeys();
                 }
             } catch (SQLException e) {
+                if (savepoint != null) {
+                    getConnection().rollback(savepoint);
+                }
                 stmt.close();
                 throw e;
+            }
+            if (savepoint != null) {
+                getConnection().commit();
             }
             if (resultSet == null) {
                 stmt.close();
@@ -598,7 +701,12 @@ public abstract class Database {
             return resultSet;
 
         } catch (SQLException ex) {
-            throw ex;
+            if (!isConnected() && autoreconnect) {
+                tryReconnect();
+                return tryExecuteReturnigGeneratedKeys(query);
+            } else {
+                throw ex;
+            }
         }
     }
 
@@ -631,37 +739,19 @@ public abstract class Database {
 
             try {
                 ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
-                int[] tipos = new int[resultSetMetaData.getColumnCount()];
-                for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
-                    String type = resultSetMetaData.getColumnClassName(col);
-                    if (type.equals(Integer.class.getCanonicalName()) || type.equals(int.class.getCanonicalName())
-                            || type.equals(Byte.class.getCanonicalName()) || type.equals(byte.class.getCanonicalName())
-                            || type.equals(Short.class.getCanonicalName()) || type.equals(short.class.getCanonicalName())
-                            || type.equals(Long.class.getCanonicalName()) || type.equals(long.class.getCanonicalName())) {
-                        tipos[col - 1] = 1;
-                    } else if (type.equals(Float.class.getCanonicalName()) || type.equals(Float.class.getCanonicalName())
-                            || type.equals(Double.class.getCanonicalName()) || type.equals(Double.class.getCanonicalName())) {
-                        tipos[col - 1] = 2;
-                    } else if (type.equals(Boolean.class.getCanonicalName()) || type.equals(boolean.class.getCanonicalName())) {
-                        tipos[col - 1] = 3;
-                    }
-                }
                 if (resultSet.next()) {
-
                     for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
-                        switch (tipos[col - 1]) {
-                            case 1:
-                                json.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getLong(col));
-                                break;
-                            case 2:
-                                json.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getDouble(col));
-                                break;
-                            case 3:
-                                json.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getBoolean(col));
-                                break;
-                            default:
-                                json.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getString(col));
-                                break;
+                        Object value = resultSet.getObject(col);
+                        if (value == null) {
+                            json.add(resultSetMetaData.getColumnLabel(col), JsonNull.INSTANCE);
+                        } else if (Number.class.isInstance(value)) {
+                            json.addProperty(resultSetMetaData.getColumnLabel(col), (Number) value);
+                        } else if (Boolean.class.isInstance(value)) {
+                            json.addProperty(resultSetMetaData.getColumnLabel(col), (Boolean) value);
+                        } else if (Date.class.isInstance(value)) {
+                            json.add(resultSetMetaData.getColumnLabel(col), CastUtil.toJson((Date) value));
+                        } else {
+                            json.addProperty(resultSetMetaData.getColumnLabel(col), value.toString());
                         }
                     }
                 }
@@ -711,45 +801,21 @@ public abstract class Database {
 
             try {
                 ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
-//                int[] tipos = new int[resultSetMetaData.getColumnCount()];;
-//                for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
-//                    String type = resultSetMetaData.getColumnClassName(col);
-//                    if (type.equals(Integer.class.getCanonicalName()) || type.equals(int.class.getCanonicalName())
-//                            || type.equals(Byte.class.getCanonicalName()) || type.equals(byte.class.getCanonicalName())
-//                            || type.equals(Short.class.getCanonicalName()) || type.equals(short.class.getCanonicalName())
-//                            || type.equals(Long.class.getCanonicalName()) || type.equals(long.class.getCanonicalName())) {
-//                        tipos[col - 1] = 1;
-//                    } else if (type.equals(Float.class.getCanonicalName()) || type.equals(Float.class.getCanonicalName())
-//                            || type.equals(Double.class.getCanonicalName()) || type.equals(Double.class.getCanonicalName())) {
-//                        tipos[col - 1] = 2;
-//                    } else if (type.equals(Boolean.class.getCanonicalName()) || type.equals(boolean.class.getCanonicalName())) {
-//                        tipos[col - 1] = 3;
-//                    }
-//                }
                 if (resultSet.next()) {
 
                     for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
                         Object value = resultSet.getObject(col);
                         json.add(resultSetMetaData.getColumnLabel(col), CastUtil.sqlToJson(value));
-//                        switch (tipos[col - 1]) {
-//                            case 1:
-//                                json.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getLong(col));
-//                                break;
-//                            case 2:
-//                                json.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getDouble(col));
-//                                break;
-//                            case 3:
-//                                json.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getBoolean(col));
-//                                break;
-//                            default:
-//                                json.addProperty(resultSetMetaData.getColumnLabel(col), resultSet.getString(col));
-//                                break;
-//                        };
                     }
                 }
             } catch (SQLException e) {
                 resultSet.close();
-                throw e;
+                if (!isConnected() && autoreconnect) {
+                    tryReconnect();
+                    return tryExecuteReturnigGeneratedKeysAsJson(query, param);
+                } else {
+                    throw e;
+                }
             }
             try {
                 resultSet.close();
@@ -762,33 +828,39 @@ public abstract class Database {
 
     public ResultSet tryExecuteReturnigGeneratedKeys(String query, Object... param) throws SQLException {
         try {
-
+            Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
             PreparedStatement stmt = createPreparedStatement(query, true, param);
             ResultSet resultSet = null;
             try {
 
                 if (stmt.executeUpdate() > 0) {
                     resultSet = stmt.getGeneratedKeys();
-                    while (resultSet.next()) {;
-                        for (int i = 1; i < resultSet.getMetaData().getColumnCount(); i++) {
-                            System.out.print(resultSet.getObject(i));
-                        }
-                        System.out.println("-----");
-                    }
-                    resultSet.first();
                 }
 
             } catch (SQLException e) {
+                if (savepoint != null) {
+                    getConnection().rollback(savepoint);
+                }
                 stmt.close();
                 throw e;
             }
+            if (savepoint != null) {
+                getConnection().commit();
+            }
+
             if (resultSet == null) {
                 stmt.close();
             }
+
             return resultSet;
 
         } catch (SQLException ex) {
-            throw ex;
+            if (!isConnected() && autoreconnect) {
+                tryReconnect();
+                return tryExecuteReturnigGeneratedKeys(query, param);
+            } else {
+                throw ex;
+            }
         }
 
     }
@@ -817,22 +889,36 @@ public abstract class Database {
      */
     public ResultSet tryExecute(String query) throws SQLException {
         try {
-            Statement stmt = con.createStatement();
+            Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
+            Statement stmt = createStatement(query);
             stmt.closeOnCompletion();
             ResultSet resultSet = null;
             try {
                 resultSet = stmt.executeQuery(query);
             } catch (SQLException e) {
+                if (savepoint != null) {
+                    getConnection().rollback(savepoint);
+                }
+
                 stmt.close();
                 throw e;
             }
+            if (savepoint != null) {
+                getConnection().commit();
+            }
+
             if (resultSet == null) {
                 stmt.close();
             }
             return resultSet;
 
         } catch (SQLException ex) {
-            throw ex;
+            if (!isConnected() && autoreconnect) {
+                tryReconnect();
+                return tryExecute(query);
+            } else {
+                throw ex;
+            }
         }
     }
 
@@ -864,26 +950,40 @@ public abstract class Database {
      */
     public ResultSet tryExecute(String query, Object... param) throws SQLException {
         try {
+            Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
             PreparedStatement stmt = createPreparedStatement(query, false, param);
 
             ResultSet resultSet = null;
             try {
                 resultSet = stmt.executeQuery();
             } catch (SQLException e) {
+                if (savepoint != null) {
+                    getConnection().rollback(savepoint);
+                }
                 stmt.close();
                 throw e;
             }
+            if (savepoint != null) {
+                getConnection().commit();
+            }
+
             if (resultSet == null) {
                 stmt.close();
             }
+
             return resultSet;
 
         } catch (SQLException ex) {
-            throw ex;
+            if (!isConnected() && autoreconnect) {
+                tryReconnect();
+                return tryExecute(query, param);
+            } else {
+                throw ex;
+            }
         }
     }
 
-    public int executeUpdate(String query, Object[] param) {
+    public int executeUpdate(String query, Object... param) {
         try {
             return tryExecuteUpdate(query, param);
         } catch (Exception e) {
@@ -901,22 +1001,35 @@ public abstract class Database {
         }
     }
 
-    public int tryExecuteUpdate(String query, Object[] param) throws SQLException {
+    public int tryExecuteUpdate(String query, Object... param) throws SQLException {
         try {
+            Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
             PreparedStatement stmt = createPreparedStatement(query, false, param);
-
             int total = 0;
             try {
                 total = stmt.executeUpdate();
             } catch (SQLException e) {
+                if (savepoint != null) {
+                    getConnection().rollback(savepoint);
+                }
+
                 stmt.close();
                 throw e;
             }
+            if (savepoint != null) {
+                getConnection().commit();
+            }
+
             stmt.close();
             return total;
 
         } catch (SQLException ex) {
-            throw ex;
+            if (!isConnected() && autoreconnect) {
+                tryReconnect();
+                return tryExecuteUpdate(query, param);
+            } else {
+                throw ex;
+            }
         }
     }
 
@@ -932,57 +1045,109 @@ public abstract class Database {
 
     public boolean tryExecuteVoid(String query) throws SQLException {
         try {
-            Statement stmt = con.createStatement();
+            Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
+            Statement stmt = createStatement(query);
             stmt.closeOnCompletion();
             boolean exe = false;
             try {
                 exe = stmt.execute(query);
             } catch (SQLException e) {
+                if (savepoint != null) {
+                    getConnection().rollback(savepoint);
+                }
+
                 stmt.close();
                 throw e;
             }
+            if (savepoint != null) {
+                getConnection().commit();
+            }
+
             stmt.close();
             return exe;
 
         } catch (SQLException ex) {
-            throw ex;
+            if (!isConnected() && autoreconnect) {
+                tryReconnect();
+                return tryExecuteVoid(query);
+            } else {
+                throw ex;
+            }
         }
     }
 
-    public boolean tryExecuteVoid(String query, Object[] param) throws SQLException {
+    public boolean executeVoid(String query, Object... param) {
         try {
+            return tryExecuteVoid(query, param);
+
+        } catch (SQLException ex) {
+            Log.printError(ex);
+            return false;
+        }
+    }
+
+    public boolean tryExecuteVoid(String query, Object... param) throws SQLException {
+        try {
+            Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
             PreparedStatement stmt = createPreparedStatement(query, false, param);
             boolean res = false;
             try {
                 stmt.execute();
             } catch (SQLException e) {
+                if (savepoint != null) {
+                    getConnection().rollback(savepoint);
+                }
+
                 stmt.close();
                 throw e;
             }
+            if (savepoint != null) {
+                getConnection().commit();
+            }
+
             stmt.close();
             return res;
 
         } catch (SQLException ex) {
-            throw ex;
+            if (!isConnected() && autoreconnect) {
+                tryReconnect();
+                return tryExecuteVoid(query, param);
+            } else {
+                throw ex;
+            }
         }
     }
 
     public int tryExecuteUpdate(String query) throws SQLException {
         try {
-            Statement stmt = con.createStatement();
+            Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
+            Statement stmt = createStatement(query);
             stmt.closeOnCompletion();
             int total = 0;
             try {
                 total = stmt.executeUpdate(query);
             } catch (SQLException e) {
+                if (savepoint != null) {
+                    getConnection().rollback(savepoint);
+                }
+
                 stmt.close();
                 throw e;
             }
+            if (savepoint != null) {
+                getConnection().commit();
+            }
+
             stmt.close();
             return total;
 
         } catch (SQLException ex) {
-            throw ex;
+            if (!isConnected() && autoreconnect) {
+                tryReconnect();
+                return tryExecuteUpdate(query);
+            } else {
+                throw ex;
+            }
         }
     }
 
@@ -992,14 +1157,17 @@ public abstract class Database {
      *
      * @return JsonArray
      */
-    public JsonArray getTables() throws SQLException {
+    public JsonArray getTablesAsJson() throws SQLException {
         String[] types = {"TABLE"};
-        ResultSet tables = con.getMetaData().getTables(null, null, null, types);
+        ResultSet tables = con.getMetaData().getTables(null, null, "%", types);
         JsonArray array = new JsonArray();
         try {
             while (tables.next()) {
-                String name = tables.getString("table_name");
-                array.add(name);
+                JsonObject data = new JsonObject();
+                for (int i = 0; i < tables.getMetaData().getColumnCount(); i++) {
+                    data.addProperty(tables.getMetaData().getColumnLabel(i + 1).toLowerCase(), tables.getString(i + 1));
+                }
+                array.add(data);
             }
         } catch (SQLException ex) {
             tables.close();
@@ -1009,11 +1177,11 @@ public abstract class Database {
         return array;
     }
 
-    public String[] getTablesAsArray() throws SQLException {
-        JsonArray json = getTables();
+    public String[] getTables() throws SQLException {
+        JsonArray json = getTablesAsJson();
         String[] tables = new String[json.size()];
         for (int i = 0; i < tables.length; i++) {
-            tables[i] = json.get(i).getAsString();
+            tables[i] = json.get(i).getAsJsonObject().get("table_name").getAsString();
         }
         return tables;
     }
@@ -1025,8 +1193,9 @@ public abstract class Database {
      *
      * @param table table in this database
      * @return JsonArray
+     * @throws java.sql.SQLException
      */
-    public JsonObject columnsAsJsonArray(String table) throws SQLException {
+    public JsonObject getColumnsAsJson(String table) throws SQLException {
         ResultSet meta = con.getMetaData().getColumns(null, null, table, null);
         JsonObject json = new JsonObject();
         try {
@@ -1067,6 +1236,7 @@ public abstract class Database {
         ResultSet meta = con.getMetaData().getColumns(null, null, table, null);
         List<github.alexozekoski.database.migration.Column> cols = new ArrayList();
         try {
+
             while (meta.next()) {
                 String column = meta.getString("COLUMN_NAME");
                 String type = meta.getString("TYPE_NAME").toUpperCase();
@@ -1076,8 +1246,10 @@ public abstract class Database {
                 boolean nullable = meta.getBoolean("NULLABLE");
                 String value = meta.getString("COLUMN_DEF");
                 int dataType = meta.getInt("DATA_TYPE");
-                boolean autoincrement = meta.getString("IS_AUTOINCREMENT").equals("YES");
-                cols.add(getMigrationType().castTypeSQL(column, type, dataType, size, prec, dec, nullable, autoincrement, value, null, null));
+                String typeName = meta.getString("TYPE_NAME");
+                String auto = meta.findColumn("IS_AUTOINCREMENT") == -1 ? null : meta.getString("IS_AUTOINCREMENT");
+                boolean autoincrement = auto != null ? auto.equals("YES") : false;
+                cols.add(getMigrationType().castTypeSQL(column, type, typeName, dataType, size, prec, dec, nullable, autoincrement, value, null, null));
             }
         } catch (SQLException ex) {
             meta.close();
@@ -1088,7 +1260,7 @@ public abstract class Database {
     }
 
     public void createTableIfNotExist(Class<? extends Model>... models) throws SQLException {
-        JsonArray lista = getTables();
+        JsonArray lista = getTablesAsJson();
         if (lista == null) {
             return;
         }
@@ -1096,7 +1268,7 @@ public abstract class Database {
             boolean exist = false;
             String table = ModelUtil.getTable(model);
             for (int i = 0; i < lista.size(); i++) {
-                JsonElement nm = lista.get(i);
+                JsonElement nm = lista.get(i).getAsJsonObject().get("table_name");
                 if (nm != null && !nm.isJsonNull()) {
                     String tabela = nm.getAsString();
                     if (tabela.equals(table)) {
@@ -1106,18 +1278,18 @@ public abstract class Database {
                 }
             }
             if (!exist) {
-                migrate(model).create();
+                migrate(model, true, true).create();
             }
         }
     }
 
     public boolean hasTable(String table) throws SQLException {
-        JsonArray lista = getTables();
+        JsonArray lista = getTablesAsJson();
         if (lista == null) {
             return false;
         }
         for (int i = 0; i < lista.size(); i++) {
-            JsonElement nm = lista.get(i);
+            JsonElement nm = lista.get(i).getAsJsonObject().get("table_name");
             if (nm != null && !nm.isJsonNull()) {
                 String tabela = nm.getAsString();
                 if (tabela.equals(table)) {
@@ -1148,70 +1320,21 @@ public abstract class Database {
         return new Query(this);
     }
 
-    public Table table(String name) {
-        return new Table(name, getMigrationType(), this);
+    public Table table(String name) throws SQLException {
+        return new Table(name, this);
     }
 
-    public Table migrate(Class<? extends Model> model) {
-        Table table = table(ModelUtil.getTable(model));
-        for (Field field : ModelUtil.getMigrationColumns(model)) {
-            Column col = field.getAnnotation(Column.class);
+    public Table migrate(Class<? extends Model> model) throws SQLException {
+        return migrate(model, true, true);
+    }
 
-            github.alexozekoski.database.migration.Column colmig = null;
-            if (col.serial()) {
-                table.bigserial(col.value());
-                continue;
-            }
-            if (!col.type().isEmpty()) {
-                colmig = table.text(col.value());
-            } else {
-                if (col.string() > 0) {
-                    colmig = table.string(col.value(), col.string());
-                } else {
-                    if (col.text()) {
-                        colmig = table.custom(col.value(), col.type());
-                    } else {
-                        String coluna = col.value();
-                        try {
-                            Class type = CastUtil.primitiveToObject(field.getType());
-                            for (Cast cast : CASTS) {
-                                if (cast.type(null, field, type, table).isAssignableFrom(type)) {
-                                    String t = cast.dataType(field, type, this);
-                                    colmig = table.custom(coluna, t);
-                                    break;
-                                }
-                            }
-                        } catch (Exception ex) {
-                            Log.printError(ex);
-                        }
-                    }
-                }
-            }
-
-            if (colmig == null) {
-                continue;
-            }
-            if (col.notnull()) {
-                colmig = colmig.notnull();
-            }
-            if (col.unique()) {
-                colmig = colmig.unique();
-            }
-            if (!col.foreignKey().equals(Serial.class)) {
-                colmig = colmig.foreignKey(col.foreignKey());
-            } else {
-                if (!col.foreign().isEmpty() && !col.key().isEmpty()) {
-                    colmig.foreignKey(col.foreign(), col.key());
-                }
-            }
-            if (!col.defaultValue().isEmpty()) {
-                colmig = colmig.defaultValue(col.defaultValue());
-            }
-            if (!col.onDelete().isEmpty()) {
-                colmig.onDelete(col.onDelete());
-            }
-
+    public Table migrate(Class<? extends Model> model, boolean createCols, boolean dropCols) throws SQLException {
+        String tableName = ModelUtil.getTable(model);
+        if (tableName == null) {
+            return null;
         }
+        Table table = table(ModelUtil.getTable(model));
+        table.add(model);
         return table;
     }
 
@@ -1251,8 +1374,12 @@ public abstract class Database {
     }
 
     public boolean tryCreateDatabase(String database) throws SQLException {
+        boolean auto = getConnection().getAutoCommit();
+        getConnection().setAutoCommit(true);
         String query = getMigrationType().createDatabase(database);
-        return tryExecuteVoid(query);
+        boolean ok = tryExecuteVoid(query);
+        getConnection().setAutoCommit(auto);
+        return ok;
     }
 
     public boolean createDatabase(String database) {
@@ -1292,7 +1419,7 @@ public abstract class Database {
     }
 
     public void dropAllTables() throws SQLException {
-        String[] tables = getTablesAsArray();
+        String[] tables = getTables();
         for (String table : tables) {
             table(table).dropTable();
         }
@@ -1321,7 +1448,7 @@ public abstract class Database {
     }
 
     public JsonObject foreingKeys() throws SQLException {
-        String[] tables = getTablesAsArray();
+        String[] tables = getTables();
         JsonObject json = new JsonObject();
         for (String table : tables) {
             JsonObject data = foreingKeys(table);
@@ -1332,8 +1459,8 @@ public abstract class Database {
         return json;
     }
 
-    public String[] getDatabasesAsArray() throws SQLException {
-        JsonArray json = getDatabases();
+    public String[] getDatabases() throws SQLException {
+        JsonArray json = getDatabasesAsJson();
         String[] databases = new String[json.size()];
         for (int i = 0; i < json.size(); i++) {
             databases[i] = json.get(i).getAsString();
@@ -1341,12 +1468,15 @@ public abstract class Database {
         return databases;
     }
 
-    public JsonArray getDatabases() throws SQLException {
+    public JsonArray getDatabasesAsJson() throws SQLException {
         DatabaseMetaData dm = con.getMetaData();
         ResultSet rs = dm.getCatalogs();
         JsonArray json = new JsonArray();
         try {
             while (rs.next()) {
+                for (int i = 1; i <= rs.getMetaData().getColumnCount(); i++) {
+                    System.out.println(rs.getString(i));
+                }
                 json.add(rs.getString("TABLE_CAT"));
             }
         } catch (SQLException ex) {
@@ -1355,16 +1485,6 @@ public abstract class Database {
         }
         rs.close();
         return json;
-    }
-
-    public PreparedStatement createStatement(String query, Object[] param) throws SQLException {
-        PreparedStatement stmt = con.prepareStatement(query);
-        if (param != null) {
-            for (int i = 0; i < param.length; i++) {
-                stmt.setObject(i + 1, param[i]);
-            }
-        }
-        return stmt;
     }
 
     public Connection getConnection() {
@@ -1381,6 +1501,26 @@ public abstract class Database {
 
     public void setDebugger(boolean debugger) {
         this.debugger = debugger;
+    }
+
+    protected void setCon(Connection con) {
+        this.con = con;
+    }
+
+    public long length() {
+        return -1;
+    }
+
+    public String getName() {
+        return "Unknown";
+    }
+
+    public boolean isAutoreconnect() {
+        return autoreconnect;
+    }
+
+    public void setAutoreconnect(boolean autoreconnect) {
+        this.autoreconnect = autoreconnect;
     }
 
 }

@@ -13,6 +13,7 @@ import github.alexozekoski.database.Log;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  *
@@ -21,16 +22,42 @@ import java.util.ArrayList;
  */
 public class ModelList<T extends Model<T>> extends ArrayList<T> {
 
-    protected Class<? extends Model> classe;
+    protected Class<? extends Model<T>> classe;
 
-    public ModelList(Class<? extends Model> classe) {
+    public ModelList(Class<? extends Model<T>> classe) {
         this.classe = classe;
     }
 
+    public ModelList(T[] array) {
+        this.classe = (Class<? extends Model<T>>) array.getClass().getComponentType();
+        for (T item : array) {
+            add(item);
+        }
+    }
+
+    public static <M extends Model<M>> ModelList<M> fromArray(M[] array) {
+        if (array == null) {
+            return null;
+        }
+        return new ModelList(array);
+    }
+
     public JsonArray toJson() {
+        return toJson((String[]) null);
+    }
+
+    public JsonArray toJson(String... columns) {
         JsonArray array = new JsonArray();
         forEach(iten -> {
-            array.add(iten.toJson());
+            array.add(iten.toJson(columns));
+        });
+        return array;
+    }
+
+    public JsonArray toJson(JsonObject args) {
+        JsonArray array = new JsonArray();
+        forEach(iten -> {
+            array.add(iten.toJson(args));
         });
         return array;
     }
@@ -59,10 +86,25 @@ public class ModelList<T extends Model<T>> extends ArrayList<T> {
     public <A> A[] getColumn(Class<A> type, String name) {
         try {
             Field field = ModelUtil.getColumn(classe, name);
-            Object a = (Array) Array.newInstance(type, size());
+            Object a = Array.newInstance(type, size());
             for (int i = 0; i < size(); i++) {
                 Array.set(a, i, ModelUtil.getObject(get(i), field));
             }
+            return (A[]) a;
+        } catch (Exception ex) {
+            Log.printError(ex);
+        }
+        return null;
+    }
+
+    public <A> List<A> getColumnAsList(Class<A> type, String name) {
+        try {
+            Field field = ModelUtil.getColumn(classe, name);
+            List<A> list = new ArrayList(size());
+            for (int i = 0; i < size(); i++) {
+                list.add((A) ModelUtil.getObject(get(i), field));
+            }
+            return list;
         } catch (Exception ex) {
             Log.printError(ex);
         }

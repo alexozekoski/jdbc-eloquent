@@ -16,30 +16,26 @@ import java.util.List;
  *
  * @author alexo
  */
-public class CastDate extends CastPrimitive<Date> {
-
-    public CastDate() {
-        super(Date.class);
-    }
+public class CastDate extends CastPrimitive {
 
     @Override
-    public Date cast(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
+    public Object sqlToField(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
         return CastUtil.toDate(sqlvalue);
     }
 
     @Override
-    public JsonElement json(Model model, Field field, Class fieldType, Date obValue) throws Exception {
-        return CastUtil.toJson(obValue);
+    public JsonElement fieldToJson(Model model, Field field, Class fieldType, Object obValue) throws Exception {
+        return CastUtil.toJson((Date)obValue);
     }
 
     @Override
-    public Date cast(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
+    public Object jsonToField(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
         return CastUtil.jsonDate(value);
     }
 
     @Override
     public String dataType(Field field, Class fieldType, Database database) throws Exception {
-        return fieldType.isArray() ? super.dataType(field, fieldType, database) : database.getMigrationType().date();
+        return arrayOrList(field, database.getMigrationType().date(), database);
     }
 
 }

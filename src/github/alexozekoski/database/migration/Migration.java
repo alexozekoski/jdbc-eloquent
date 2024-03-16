@@ -7,6 +7,7 @@ package github.alexozekoski.database.migration;
 
 import github.alexozekoski.database.Database;
 import github.alexozekoski.database.model.Model;
+import java.sql.SQLException;
 import java.util.List;
 
 /**
@@ -15,26 +16,63 @@ import java.util.List;
  */
 public abstract class Migration {
 
-    public static boolean migrate(Database database, List<Class<? extends Model>> models) {
+    public static void migrate(Database database, List<Class<? extends Model>> models) throws SQLException {
+        migrate(database, true, true, models);
+    }
+
+    public static void migrate(Database database, Class<? extends Model>... models) throws SQLException {
+        migrate(database, true, true, models);
+    }
+
+    public static void migrate(Database database, boolean alterCols, boolean dropCold, List<Class<? extends Model>> models) throws SQLException {
         for (Class<? extends Model> classe : models) {
-            if (database.migrate(classe).create()) {
-                return false;
+            char result = database.migrate(classe, alterCols, dropCold).update(true, alterCols, dropCold);
+            if(result == 'C' && Seeder.class.isAssignableFrom(classe)){
+                Seeder model = (Seeder)Model.newInstance(classe, database);
+                model.onCreateTable(database);
             }
         }
-        return true;
     }
 
-    public static boolean fresh(Database database, List<Class<? extends Model>> models) {
+    public static void migrate(Database database, boolean alterCols, boolean dropCold, Class<? extends Model>... models) throws SQLException {
+        for (Class<? extends Model> classe : models) {
+            char result = database.migrate(classe, alterCols, dropCold).update(true, alterCols, dropCold);
+            if(result == 'C' && Seeder.class.isAssignableFrom(classe)){
+                Seeder model = (Seeder)Model.newInstance(classe, database);
+                model.onCreateTable(database);
+            }
+        }
+    }
+
+    public static void fresh(Database database, List<Class<? extends Model>> models) throws SQLException {
         for (int i = models.size() - 1; i >= 0; i--) {
             Class<? extends Model> classe = models.get(i);
-            database.migrate(classe).dropTable();
+            database.migrate(classe, true, true).dropTable();
         }
-        return migrate(database, models);
+        migrate(database, true, true, models);
     }
 
-    public static void drop(Database database, List<Class<? extends Model>> models) {
+    public static void fresh(Database database, Class<? extends Model>... models) throws SQLException {
+        for (int i = models.length - 1; i >= 0; i--) {
+            Class<? extends Model> classe = models[i];
+            database.migrate(classe, true, true).dropTable();
+        }
+        migrate(database, true, true, models);
+    }
+
+    public static void drop(Database database, List<Class<? extends Model>> models) throws SQLException {
+        for (int i = models.size() - 1; i >= 0; i--) {
+            Class<? extends Model> classe = models.get(i);
+            database.migrate(classe, true, true).dropTable();
+        }
         for (Class<? extends Model> classe : models) {
-            database.migrate(classe).dropTable();
+            database.migrate(classe, true, true).dropTable();
+        }
+    }
+
+    public static void drop(Database database, Class<? extends Model>... models) throws SQLException {
+        for (Class<? extends Model> classe : models) {
+            database.migrate(classe, true, true).dropTable();
         }
     }
 }

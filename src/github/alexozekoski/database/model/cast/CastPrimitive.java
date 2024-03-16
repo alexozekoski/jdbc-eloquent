@@ -7,6 +7,7 @@ package github.alexozekoski.database.model.cast;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonParser;
 import github.alexozekoski.database.Database;
 import github.alexozekoski.database.Log;
@@ -19,36 +20,25 @@ import java.util.List;
  *
  * @author alexo
  */
-public class CastPrimitive<T> implements Cast<T> {
+public class CastPrimitive implements Cast {
 
-    private Class classe;
-
-    public CastPrimitive(Class classe) {
-        this.classe = classe;
+    @Override
+    public Object sqlToField(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
+        return sqlvalue;
     }
 
     @Override
-    public T cast(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
-        return (T) sqlvalue;
-    }
-
-    @Override
-    public Object castSql(Model model, Field field, Class fieldType, T obValue) throws Exception {
+    public Object fieldToSql(Model model, Field field, Class fieldType, Object obValue, boolean where) throws Exception {
         return obValue;
     }
 
     @Override
-    public Class type(Model model, Field field, Class fieldType, Object obValue) throws Exception {
-        return classe;
+    public JsonElement fieldToJson(Model model, Field field, Class fieldType, Object obValue) throws Exception {
+        return JsonNull.INSTANCE;
     }
 
     @Override
-    public JsonElement json(Model model, Field field, Class fieldType, T obValue) throws Exception {
-        return null;
-    }
-
-    @Override
-    public T cast(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
+    public Object jsonToField(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
         return null;
     }
 
@@ -58,56 +48,77 @@ public class CastPrimitive<T> implements Cast<T> {
     }
 
     @Override
-    public JsonElement arrayJson(Model model, Field field, Class fieldType, T[] values) throws Exception {
-        if (values == null) {
+    public JsonElement fieldArrayToJsonArray(Model model, Field field, Class fieldType, Object arrayValues) throws Exception {
+        if (arrayValues == null) {
             return null;
         }
-
-        JsonArray array = new JsonArray(values.length);
-        for (T value : values) {
-            array.add(json(model, field, fieldType, value));
+        if (List.class.isAssignableFrom(fieldType)) {
+            List list = (List) arrayValues;
+            JsonArray array = new JsonArray(list.size());
+            for (Object value : list) {
+                array.add(fieldToJson(model, field, fieldType, value));
+            }
+            return array;
+        }
+        int length = Array.getLength(arrayValues);
+        JsonArray array = new JsonArray(length);
+        for (int i = 0; i < length; i++) {
+            Object value = Array.get(arrayValues, i);
+            array.add(fieldToJson(model, field, fieldType, value));
         }
         return array;
     }
 
     @Override
-    public T[] arrayCast(Model model, List<Model> stack, Field field, Class fieldType, Object sqlValue) throws Exception {
+    public Object sqlToFieldArray(Model model, List<Model> stack, Field field, Class fieldType, Object sqlValue) throws Exception {
+        if(sqlValue == null){
+            return null;
+        }
         if (String.class.isInstance(sqlValue)) {
             try {
                 JsonElement json = JsonParser.parseString((String) sqlValue);
-                return arrayCast(model, stack, field, fieldType, json);
+                return jsonArrayToFieldArray(model, stack, field, fieldType, json);
             } catch (Exception ex) {
                 Log.printWarning(ex);
             }
         }
-        T[] array = (T[]) Array.newInstance(classe, 1);
-        array[0] = cast(model, stack, field, fieldType, sqlValue);
+        Object array = Array.newInstance(fieldType, 1);
+        Object obj = sqlToField(model, stack, field, fieldType, sqlValue);
+        if (obj != null) {
+            Array.set(array, 0, null);
+        }
+
         return array;
 
     }
 
     @Override
-    public T[] arrayCast(Model model, List<Model> stack, Field field, Class fieldType, JsonElement values) throws Exception {
+    public Object jsonArrayToFieldArray(Model model, List<Model> stack, Field field, Class fieldType, JsonElement values) throws Exception {
         if (values.isJsonNull()) {
             return null;
         }
         if (values.isJsonArray()) {
             JsonArray array = values.getAsJsonArray();
-            T[] obs = (T[]) Array.newInstance(classe, 1);
+            Object obs = Array.newInstance(fieldType, array.size());
             for (int i = 0; i < array.size(); i++) {
                 JsonElement el = array.get(i);
-                obs[i] = cast(model, stack, field, fieldType, el);
+                Array.set(obs, i, jsonToField(model, stack, field, fieldType, el));
             }
             return obs;
         }
-        T[] array = (T[]) Array.newInstance(classe, 1);
-        array[0] = cast(model, stack, field, fieldType, values);
+        Object array = Array.newInstance(fieldType, 1);
+        Array.set(array, 0, jsonToField(model, stack, field, fieldType, values));
         return array;
     }
 
     @Override
-    public Object castSql(Model model, Field field, Class fieldType, T[] obValue) throws Exception {
-        return arrayJson(model, field, fieldType, obValue).toString();
+    public Object fieldArrayToSql(Model model, Field field, Class fieldType, Object arrayValues, boolean where) throws Exception {
+        JsonElement json = fieldArrayToJsonArray(model, field, fieldType, arrayValues);
+        return json == null ? null : json.toString();
+    }
+
+    public String arrayOrList(Field field, String defaultValue, Database database) {
+        return field.getType().isArray() || List.class.isAssignableFrom(field.getType()) ? database.getMigrationType().text() : defaultValue;
     }
 
 //    @Override
@@ -189,5 +200,4 @@ public class CastPrimitive<T> implements Cast<T> {
 //    public void afterDelete(Model model, List<Model> stack, Field field, Class fieldType, T[] obValue) throws Exception {
 //        
 //    };
-
 }

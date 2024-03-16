@@ -15,6 +15,7 @@ import com.google.gson.JsonObject;
 public class FirebirdSQL extends Database {
 
     public static final String JDBC = "firebirdsql";
+    public static final String NAME = "Firebird";
 
     public FirebirdSQL(JsonObject json) {
         super(json);
@@ -28,25 +29,25 @@ public class FirebirdSQL extends Database {
     public FirebirdSQL() {
         setJdbc(JDBC);
     }
-    
+
     public FirebirdSQL(String database) {
         super(JDBC, null, null, null, null, database);
     }
 
-    public JsonArray listOfTables() {
-        JsonArray array = new JsonArray();
-        try {
-            array = executeAsJsonArray("SELECT trim(RDB$RELATION_NAME) as \"nome\" FROM RDB$RELATIONS WHERE (RDB$SYSTEM_FLAG <> 1 OR RDB$SYSTEM_FLAG IS NULL) AND RDB$VIEW_BLR IS NULL ORDER BY RDB$RELATION_NAME;");
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return array;
-    }
+//    public JsonArray listOfTables() {
+//        JsonArray array = new JsonArray();
+//        try {
+//            array = executeAsJson("SELECT trim(RDB$RELATION_NAME) as \"nome\" FROM RDB$RELATIONS WHERE (RDB$SYSTEM_FLAG <> 1 OR RDB$SYSTEM_FLAG IS NULL) AND RDB$VIEW_BLR IS NULL ORDER BY RDB$RELATION_NAME;");
+//        } catch (Exception e) {
+//            e.printStackTrace();
+//        }
+//        return array;
+//    }
 
     public JsonArray listOfColumns(String table) {
         JsonArray array = new JsonArray();
         try {
-            array = executeAsJsonArray("pragma table_info('" + table + "')");
+            array = executeAsJson("pragma table_info('" + table + "')");
             JsonArray novaLista = new JsonArray();
             for (int i = 0; i < array.size(); i++) {
                 JsonObject velho = array.get(i).getAsJsonObject();
@@ -60,6 +61,11 @@ public class FirebirdSQL extends Database {
             e.printStackTrace();
         }
         return array;
+    }
+
+    @Override
+    public String getName() {
+        return NAME;
     }
 
 }

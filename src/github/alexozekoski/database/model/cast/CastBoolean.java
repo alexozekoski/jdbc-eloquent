@@ -17,19 +17,15 @@ import java.util.List;
  *
  * @author alexo
  */
-public class CastBoolean extends CastPrimitive<Boolean> {
-
-    public CastBoolean() {
-        super(Boolean.class);
-    }
+public class CastBoolean extends CastPrimitive {
 
     @Override
-    public Boolean cast(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
+    public Object sqlToField(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
         if (sqlvalue == null) {
             return null;
         }
         if (Boolean.class.isInstance(sqlvalue)) {
-            return (Boolean) sqlvalue;
+            return (boolean) sqlvalue;
         }
         if (Number.class.isInstance(sqlvalue)) {
             return ((Number) sqlvalue).longValue() == 1;
@@ -41,12 +37,12 @@ public class CastBoolean extends CastPrimitive<Boolean> {
     }
 
     @Override
-    public JsonElement json(Model model, Field field, Class fieldType, Boolean obValue) throws Exception {
-        return obValue == null ? JsonNull.INSTANCE : new JsonPrimitive(obValue);
+    public JsonElement fieldToJson(Model model, Field field, Class fieldType, Object obValue) throws Exception {
+        return obValue == null ? JsonNull.INSTANCE : new JsonPrimitive((boolean) obValue);
     }
 
     @Override
-    public Boolean cast(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
+    public Object jsonToField(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
         if (value.isJsonNull()) {
             return null;
         }
@@ -55,7 +51,7 @@ public class CastBoolean extends CastPrimitive<Boolean> {
 
     @Override
     public String dataType(Field field, Class fieldType, Database database) throws Exception {
-        return fieldType.isArray() ? super.dataType(field, fieldType, database) : database.getMigrationType().booleano();
+        return arrayOrList(field, database.getMigrationType().booleano(), database);
     }
 
 }

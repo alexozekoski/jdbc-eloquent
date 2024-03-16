@@ -16,29 +16,26 @@ import java.util.List;
  *
  * @author alexo
  */
-public class CastTimestamp extends CastPrimitive<Timestamp> {
+public class CastTimestamp extends CastPrimitive {
 
-    public CastTimestamp() {
-        super(Timestamp.class);
-    }
 
     @Override
-    public Timestamp cast(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
+    public Object sqlToField(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
         return CastUtil.toTimestamp(sqlvalue);
     }
 
     @Override
-    public JsonElement json(Model model, Field field, Class fieldType, Timestamp obValue) throws Exception {
-        return CastUtil.toJson(obValue);
+    public JsonElement fieldToJson(Model model, Field field, Class fieldType, Object obValue) throws Exception {
+        return CastUtil.toJson((Timestamp)obValue);
     }
 
     @Override
-    public Timestamp cast(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
+    public Object jsonToField(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
         return CastUtil.jsonTimestamp(value);
     }
 
     @Override
     public String dataType(Field field, Class fieldType, Database database) throws Exception {
-        return fieldType.isArray() ? super.dataType(field, fieldType, database) : database.getMigrationType().datetime();
+        return arrayOrList(field, database.getMigrationType().datetime(), database);
     }
 }

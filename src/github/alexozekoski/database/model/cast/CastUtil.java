@@ -10,13 +10,10 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonPrimitive;
 import java.sql.Time;
 import java.sql.Timestamp;
-import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.List;
 import java.util.TimeZone;
-import java.util.function.Consumer;
 
 /**
  *
@@ -24,22 +21,28 @@ import java.util.function.Consumer;
  */
 public class CastUtil {
 
-    public static DateFormat DATE_JSON = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+    public static final String DATE_YYYYMMDDTHHMMSSSSS = "yyyy-MM-dd'T'HH:mm:ss.SSS";
+    public static final String DATE_YYYYMMDDHHMMSS = "yyyy-MM-dd HH:mm:ss";
+    public static final String DATE_YYYYMMDDTHHMM = "yyyy-MM-dd'T'HH:mm";
+    public static final String DATE_YYYYMMDDHHMM = "yyyy-MM-dd HH:mm";
+    public static final String DATE_YYYYMMDD = "yyyy-MM-dd";
 
-    public static DateFormat DATE_SQL = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+    public static final String TIME_JSON = "HH:mm";
+
+    public static final String DATE_SQL = "yyyy-MM-dd HH:mm:ss.SSS";
 
     public static JsonElement sqlToJson(Object sqlObject) {
-        if(sqlObject == null){
-           return JsonNull.INSTANCE; 
+        if (sqlObject == null) {
+            return JsonNull.INSTANCE;
         }
-        if(Number.class.isInstance(sqlObject)){
-            return new JsonPrimitive((Number)sqlObject);
+        if (Number.class.isInstance(sqlObject)) {
+            return new JsonPrimitive((Number) sqlObject);
         }
-        if(Boolean.class.isInstance(sqlObject)){
-            return new JsonPrimitive((Number)sqlObject);
+        if (Boolean.class.isInstance(sqlObject)) {
+            return new JsonPrimitive((Number) sqlObject);
         }
         return new JsonPrimitive(sqlObject.toString());
-        
+
     }
 
     public static Date timeToDateUtil(long time) {
@@ -53,7 +56,25 @@ public class CastUtil {
     }
 
     public static Date stringToDateUtil(String jsonDate) throws ParseException {
-        return DATE_JSON.parse(jsonDate);
+        if (jsonDate == null) {
+            return null;
+        }
+        if (jsonDate.isEmpty()) {
+            return null;
+        }
+        if (jsonDate.length() == 24) {
+            jsonDate = jsonDate.substring(0, 23);
+        }
+        if (jsonDate.length() == 23) {
+            return new SimpleDateFormat(DATE_YYYYMMDDTHHMMSSSSS).parse(jsonDate);
+        }
+        if (jsonDate.length() == 19) {
+            return new SimpleDateFormat(DATE_YYYYMMDDHHMMSS).parse(jsonDate);
+        }
+        if (jsonDate.length() == 10) {
+            return new SimpleDateFormat(DATE_YYYYMMDD).parse(jsonDate);
+        }
+        return jsonDate.contains("T") ? new SimpleDateFormat(DATE_YYYYMMDDTHHMM).parse(jsonDate) : new SimpleDateFormat(DATE_YYYYMMDDHHMM).parse(jsonDate);
     }
 
     public static Date jsonDateUtil(JsonElement json) throws ParseException {
@@ -93,14 +114,25 @@ public class CastUtil {
         if (json.getAsJsonPrimitive().isNumber()) {
             return new Time(json.getAsLong());
         }
+        String jsonTime = json.getAsString();
+        if (jsonTime.length() == 5) {
+            return new Time(new SimpleDateFormat(TIME_JSON).parse(jsonTime).getTime());
+        }
         return new Time(stringToDateUtil(json.getAsString()).getTime());
+    }
+
+    public static JsonElement toJsonTime(Time time) {
+        if (time == null) {
+            return JsonNull.INSTANCE;
+        }
+        return new JsonPrimitive(new SimpleDateFormat(TIME_JSON).format(time));
     }
 
     public static JsonElement toJson(Date date) {
         if (date == null) {
             return JsonNull.INSTANCE;
         }
-        return new JsonPrimitive(DATE_JSON.format(date));
+        return new JsonPrimitive(new SimpleDateFormat(DATE_YYYYMMDDTHHMMSSSSS).format(date));
     }
 
     public static Date toDateUtil(Object sqlvalue) throws ParseException {
@@ -111,7 +143,7 @@ public class CastUtil {
             return (Date) sqlvalue;
         }
         if (String.class.isInstance(sqlvalue)) {
-            return DATE_SQL.parse((String) sqlvalue);
+            return new SimpleDateFormat(DATE_SQL).parse((String) sqlvalue);
         }
         if (Number.class.isInstance(sqlvalue)) {
             return new Date((Long) sqlvalue);
@@ -130,7 +162,7 @@ public class CastUtil {
             return new java.sql.Date(((Date) sqlvalue).getTime());
         }
         if (String.class.isInstance(sqlvalue)) {
-            return new java.sql.Date(DATE_SQL.parse((String) sqlvalue).getTime());
+            return new java.sql.Date(new SimpleDateFormat(DATE_SQL).parse((String) sqlvalue).getTime());
         }
         if (Number.class.isInstance(sqlvalue)) {
             return new java.sql.Date((Long) sqlvalue);
@@ -146,7 +178,7 @@ public class CastUtil {
             return (Timestamp) sqlvalue;
         }
         if (String.class.isInstance(sqlvalue)) {
-            return new Timestamp(DATE_SQL.parse((String) sqlvalue).getTime());
+            return new Timestamp(new SimpleDateFormat(DATE_SQL).parse((String) sqlvalue).getTime());
         }
         if (Number.class.isInstance(sqlvalue)) {
             return new Timestamp((Long) sqlvalue);
@@ -168,41 +200,44 @@ public class CastUtil {
             return new Time(((Date) sqlvalue).getTime());
         }
         if (String.class.isInstance(sqlvalue)) {
-            return new Time(DATE_SQL.parse((String) sqlvalue).getTime());
+            return new Time(new SimpleDateFormat(DATE_SQL).parse((String) sqlvalue).getTime());
         }
         if (Number.class.isInstance(sqlvalue)) {
+            if (sqlvalue instanceof Integer) {
+                sqlvalue = ((Integer) sqlvalue).longValue();
+            }
             return new Time((Long) sqlvalue);
         }
         return null;
     }
 
-    public static Class primitiveToObject(Class classe) {
-        if (classe.isPrimitive()) {
-            if (classe == long.class) {
-                return Long.class;
-            }
-            if (classe == int.class) {
-                return Integer.class;
-            }
-            if (classe == boolean.class) {
-                return Boolean.class;
-            }
-            if (classe == double.class) {
-                return Double.class;
-            }
-            if (classe == float.class) {
-                return Float.class;
-            }
-            if (classe == byte.class) {
-                return Byte.class;
-            }
-            if (classe == char.class) {
-                return Character.class;
-            }
-            if (classe == short.class) {
-                return Short.class;
-            }
-        }
-        return classe;
-    }
+//    public static Class primitiveToObject(Class classe) {
+//        if (classe.isPrimitive()) {
+//            if (classe == long.class) {
+//                return Long.class;
+//            }
+//            if (classe == int.class) {
+//                return Integer.class;
+//            }
+//            if (classe == boolean.class) {
+//                return Boolean.class;
+//            }
+//            if (classe == double.class) {
+//                return Double.class;
+//            }
+//            if (classe == float.class) {
+//                return Float.class;
+//            }
+//            if (classe == byte.class) {
+//                return Byte.class;
+//            }
+//            if (classe == char.class) {
+//                return Character.class;
+//            }
+//            if (classe == short.class) {
+//                return Short.class;
+//            }
+//        }
+//        return classe;
+//    };
 }

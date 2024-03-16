@@ -10,6 +10,7 @@ package github.alexozekoski.database.query;
  * @author alexozekoski
  */
 public interface Clause {
+    public boolean hasValue(char type);
 
     public String query(char type);
 

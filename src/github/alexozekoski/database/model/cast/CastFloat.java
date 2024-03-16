@@ -17,14 +17,10 @@ import java.util.List;
  *
  * @author alexo
  */
-public class CastFloat extends CastPrimitive<Float> {
-
-    public CastFloat() {
-        super(Float.class);
-    }
+public class CastFloat extends CastPrimitive {
 
     @Override
-    public Float cast(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
+    public Object sqlToField(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
         if (sqlvalue == null) {
             return null;
         }
@@ -38,12 +34,12 @@ public class CastFloat extends CastPrimitive<Float> {
     }
 
     @Override
-    public JsonElement json(Model model, Field field, Class fieldType, Float obValue) throws Exception {
-        return obValue == null ? JsonNull.INSTANCE : new JsonPrimitive(obValue);
+    public JsonElement fieldToJson(Model model, Field field, Class fieldType, Object obValue) throws Exception {
+        return obValue == null ? JsonNull.INSTANCE : new JsonPrimitive((float)obValue);
     }
 
     @Override
-    public Float cast(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
+    public Object jsonToField(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
         if (value.isJsonNull()) {
             return null;
         }
@@ -52,7 +48,7 @@ public class CastFloat extends CastPrimitive<Float> {
 
     @Override
     public String dataType(Field field, Class fieldType, Database database) throws Exception {
-        return fieldType.isArray() ? super.dataType(field, fieldType, database) : database.getMigrationType().numeric();
+        return arrayOrList(field, database.getMigrationType().numeric(), database);
     }
 
 }

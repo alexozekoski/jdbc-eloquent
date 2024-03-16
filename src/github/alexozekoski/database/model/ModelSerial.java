@@ -17,7 +17,7 @@ import java.util.Objects;
  */
 public class ModelSerial<T extends ModelSerial<T>> extends Model<T> implements Serial<T> {
 
-    @Column(primary = true, value = "id", serial = true)
+    @Column(primary = true, value = "id", serial = true, notnull = true, fill = false)
     public Long id;
 
     @Column(value = "created", fill = false)
@@ -27,6 +27,7 @@ public class ModelSerial<T extends ModelSerial<T>> extends Model<T> implements S
     public Timestamp updated;
 
     public ModelSerial() {
+        
     }
 
     public ModelSerial(Database database) {
@@ -44,26 +45,27 @@ public class ModelSerial<T extends ModelSerial<T>> extends Model<T> implements S
     public void onCreate() {
         created = new Timestamp(new java.util.Date().getTime());
         updated = new Timestamp(new java.util.Date().getTime());
+        super.onCreate();
     }
 
     @Override
     public void onUpdate() {
         updated = new Timestamp(new java.util.Date().getTime());
+        super.onUpdate();
     }
 
     @Override
-    public boolean update() {
+    public boolean update(String... columns) {
         if (id == null) {
             return false;
         }
-        return super.update();
+        return super.update(columns);
     }
 
-    @Override
-    public T get(Long id) {
-        return query().where("id", id).first();
-    }
-
+//    @Override;
+//    public T get(Long id) {
+//        return query().where("id", id).first();
+//    }
     @Override
     public Long getId() {
         return id;
@@ -78,4 +80,10 @@ public class ModelSerial<T extends ModelSerial<T>> extends Model<T> implements S
     public boolean equals(Long id) {
         return Objects.equals(this.id, id);
     }
+
+    @Override
+    public boolean equals(Object obj) {
+        return super.equals(obj) || (getClass().isInstance(obj) && equals(((ModelSerial) obj).id));
+    }
+
 }

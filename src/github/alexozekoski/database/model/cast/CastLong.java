@@ -17,14 +17,10 @@ import java.util.List;
  *
  * @author alexo
  */
-public class CastLong extends CastPrimitive<Long> {
-
-    public CastLong() {
-        super(Long.class);
-    }
+public class CastLong extends CastPrimitive {
 
     @Override
-    public Long cast(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
+    public Object sqlToField(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
         if (sqlvalue == null) {
             return null;
         }
@@ -41,12 +37,12 @@ public class CastLong extends CastPrimitive<Long> {
     }
 
     @Override
-    public JsonElement json(Model model, Field field, Class fieldType, Long obValue) throws Exception {
-        return obValue == null ? JsonNull.INSTANCE : new JsonPrimitive(obValue);
+    public JsonElement fieldToJson(Model model, Field field, Class fieldType, Object obValue) throws Exception {
+        return obValue == null ? JsonNull.INSTANCE : new JsonPrimitive((long)obValue);
     }
 
     @Override
-    public Long cast(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
+    public Object jsonToField(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
         if (value.isJsonNull()) {
             return null;
         }
@@ -55,7 +51,7 @@ public class CastLong extends CastPrimitive<Long> {
 
     @Override
     public String dataType(Field field, Class fieldType, Database database) throws Exception {
-        return fieldType.isArray() ? super.dataType(field, fieldType, database) : database.getMigrationType().bigint();
+        return arrayOrList(field, database.getMigrationType().bigint(), database);
     }
 
 }

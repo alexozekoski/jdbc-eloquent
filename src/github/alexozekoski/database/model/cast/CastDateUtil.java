@@ -16,35 +16,31 @@ import java.util.List;
  *
  * @author alexo
  */
-public class CastDateUtil extends CastPrimitive<Date> {
-
-    public CastDateUtil() {
-        super(Date.class);
-    }
+public class CastDateUtil extends CastPrimitive {
 
     @Override
-    public Date cast(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
+    public Object sqlToField(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
         return CastUtil.toDate(sqlvalue);
     }
 
     @Override
-    public Object castSql(Model model, Field field, Class fieldType, Date obValue) throws Exception {
-        return new java.sql.Date(obValue.getTime());
+    public Object fieldToSql(Model model, Field field, Class fieldType, Object obValue, boolean where) throws Exception {
+        return new java.sql.Date(((Date) obValue).getTime());
     }
 
     @Override
-    public JsonElement json(Model model, Field field, Class fieldType, Date obValue) throws Exception {
-        return CastUtil.toJson(obValue);
+    public JsonElement fieldToJson(Model model, Field field, Class fieldType, Object obValue) throws Exception {
+        return CastUtil.toJson((Date) obValue);
     }
 
     @Override
-    public Date cast(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
+    public Object jsonToField(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
         return CastUtil.jsonDateUtil(value);
     }
 
     @Override
     public String dataType(Field field, Class fieldType, Database database) throws Exception {
-        return fieldType.isArray() ? super.dataType(field, fieldType, database) : database.getMigrationType().datetime();
+        return arrayOrList(field, database.getMigrationType().datetime(), database);
     }
 
 }

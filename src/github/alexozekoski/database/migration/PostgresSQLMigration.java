@@ -93,22 +93,22 @@ public class PostgresSQLMigration implements MigrationType {
 
     @Override
     public String dropTable(String table) {
-        return "DROP TABLE IF EXISTS " + table + " CASCADE";
+        return "DROP TABLE IF EXISTS \"" + table + "\" CASCADE";
     }
 
     @Override
     public String createTable(String table) {
-        return "CREATE TABLE";
+        return "CREATE TABLE \"" + table + "\"";
     }
 
     @Override
     public String createDatabase(String database) {
-        return "CREATE DATABASE " + database;
+        return "CREATE DATABASE \"" + database + "\"";
     }
 
     @Override
     public String dropDatabase(String database) {
-        return "DROP DATABASE " + database;
+        return "DROP DATABASE \"" + database + "\"";
     }
 
     @Override
@@ -126,7 +126,7 @@ public class PostgresSQLMigration implements MigrationType {
                 cols += ", \"" + col + "\"";
             }
         }
-        return "CREATE  INDEX \"" + index + "\" ON " + table + "(" + cols + ")";
+        return "CREATE  INDEX \"" + index + "\" ON \"" + table + "\"(" + cols + ")";
     }
 
     @Override
@@ -135,23 +135,19 @@ public class PostgresSQLMigration implements MigrationType {
     }
 
     @Override
-    public String createForeignKey(String index, String table, String column) {
-        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
-    }
-
-    @Override
-    public String dropForeignKey(String index, String table, String column) {
-        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
-    }
-
-    @Override
-    public String castTypeSQL(String column, String type, int dataType, long size, long precision, long decimal, boolean nullable, boolean autoincrement, String defaultValue) {
-        System.out.println(type);
-        //System.out.println(size);
-        System.out.println(column);
-        System.out.println(precision);
-        System.out.println(decimal);
+    public String castTypeSQL(String column, String type, String typeName, int dataType, long size, long precision, long decimal, boolean nullable, boolean autoincrement, String defaultValue) {
         String dt = java.sql.JDBCType.valueOf(dataType).getName();
+        switch (typeName) {
+            case "text": {
+                return "TEXT";
+            }
+            case "serial": {
+                return "SERIAL";
+            }
+            case "bigsrial": {
+                return "BIGSERIAL";
+            }
+        }
         switch (dataType) {
             case java.sql.Types.VARCHAR: {
                 return dt + "(" + size + ")";
@@ -163,13 +159,72 @@ public class PostgresSQLMigration implements MigrationType {
     }
 
     @Override
-    public Column castTypeSQL(String column, String type, int dataType, long size, long precision, long decimal, boolean nullable, boolean autoincrement, String defaultValue, String foreignTable, String foreignColumn) {
-        Column col = new Column(column, castTypeSQL(column, type, dataType, size, precision, decimal, nullable, autoincrement, defaultValue), this);
-        col.nullable(nullable);
-        col.autoincrement(autoincrement);
-        col.setDefaultValue(defaultValue);
-        col.foreignKey(foreignTable, foreignColumn);
+    public Column castTypeSQL(String column, String type, String typeName, int dataType, long size, long precision, long decimal, boolean nullable, boolean autoincrement, String defaultValue, String foreignTable, String foreignColumn) {
+        Column col = new Column(column, castTypeSQL(column, type, typeName, dataType, size, precision, decimal, nullable, autoincrement, defaultValue), this, true);
+
+        col.nullable(!nullable);
+        if (!("serial".equals(typeName) || "bigserial".equals(typeName))) {
+            col.autoincrement(autoincrement);
+            col.setDefaultValue(defaultValue);
+            col.foreignKey(foreignTable, foreignColumn);
+        }
         return col;
     }
 
+    @Override
+    public String addColumn(Table table, Column[] cols) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("ALTER TABLE ");
+        sb.append(carrot());
+        sb.append(table.getName());
+        sb.append(carrot());
+        boolean first = true;
+        for (Column col : cols) {
+            if (first) {
+                first = false;
+            } else {
+                sb.append(",");
+            }
+            sb.append("\nADD ");
+            sb.append(col.toString());
+        }
+        sb.append(";");
+        return sb.toString();
+    }
+
+    @Override
+    public String dropColumn(Table table, Column[] cols) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("ALTER TABLE ");
+        sb.append(carrot());
+        sb.append(table.getName());
+        sb.append(carrot());
+        boolean first = true;
+        for (Column col : cols) {
+            if (first) {
+                first = false;
+            } else {
+                sb.append(",");
+            }
+            sb.append("\nDROP COLUMN ");
+            sb.append(col.getName());
+        }
+        sb.append(";");
+        return sb.toString();
+    }
+
+    @Override
+    public String carrot() {
+        return "\"";
+    }
+
+    @Override
+    public String byteArray() {
+        return "BYTEA";
+    }
+
+    @Override
+    public String blob() {
+        return "BYTEA";
+    }
 }

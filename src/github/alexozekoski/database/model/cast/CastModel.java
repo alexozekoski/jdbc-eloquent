@@ -20,14 +20,10 @@ import java.util.List;
  *
  * @author alexo
  */
-public class CastModel extends CastPrimitive<Model> {
-
-    public CastModel() {
-        super(Model.class);
-    }
+public class CastModel extends CastPrimitive {
 
     @Override
-    public Model cast(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
+    public Object sqlToField(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
         if (sqlvalue == null) {
             return null;
         }
@@ -41,7 +37,7 @@ public class CastModel extends CastPrimitive<Model> {
             } else {
                 id = Long.parseLong((String) sqlvalue);
             }
-            m = findOrCreate(fieldType, id, stack);
+            m = findOrCreate(fieldType, id, stack, model.getDatabase());
         } else {
             m = ((Model) Model.newInstance(fieldType)).set(JsonParser.parseString((String) sqlvalue).getAsJsonObject());
             stack.add(m);
@@ -50,26 +46,23 @@ public class CastModel extends CastPrimitive<Model> {
     }
 
     @Override
-    public JsonElement json(Model model, Field field, Class fieldType, Model obValue) throws Exception {
-        return obValue != null ? obValue.toJson() : JsonNull.INSTANCE;
+    public JsonElement fieldToJson(Model model, Field field, Class fieldType, Object obValue) throws Exception {
+        return obValue != null ? ((Model)obValue).toJson() : JsonNull.INSTANCE;
     }
 
     @Override
-    public Model cast(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
-        if (value == null || value.isJsonNull() || !value.isJsonObject() || !value.isJsonPrimitive()) {
+    public Object jsonToField(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
+        Column col = field.getAnnotation(Column.class);
+        if (value == null || value.isJsonNull() || !col.foreignFill()) {
             return null;
         }
         Model m;
-        Column col = field.getAnnotation(Column.class);
-        if (Serial.class.isAssignableFrom(fieldType) && ModelUtil.isForeign(col)) {
 
-            Long id;
+        if (Serial.class.isAssignableFrom(fieldType) && ModelUtil.isForeign(col)) {
+            Long id = null;
             if (value.isJsonObject()) {
                 m = (Model) field.get(model);
                 if (m != null) {
-                    if (col.foreignUnique()) {
-                        value.getAsJsonObject().remove("id");
-                    }
                     m.set(value.getAsJsonObject());
                     stack.add(m);
                     return m;
@@ -77,14 +70,20 @@ public class CastModel extends CastPrimitive<Model> {
                 JsonElement jsonid = value.getAsJsonObject().get("id");
                 id = jsonid == null || jsonid.isJsonNull() ? null : jsonid.getAsLong();
             } else {
-                id = value.getAsLong();
+                if(col.foreignOnlyObject()){
+                    return null;
+                }
+                if (value.getAsJsonPrimitive().isNumber()) {
+                    id = value.getAsLong();
+                }
             }
-            m = findOrCreate(fieldType, id, stack);
-            if (value.isJsonObject() && (id == null || col.foreignFill())) {
+            m = findOrCreate(fieldType, id, stack, model.getDatabase());
+            if (value.isJsonObject() && id == null) {
                 m.set(value.getAsJsonObject());
+
             }
         } else {
-            m = findOrCreate(fieldType, null, stack);
+            m = findOrCreate(fieldType, null, stack, model.getDatabase());
         }
         return m;
     }
@@ -92,14 +91,14 @@ public class CastModel extends CastPrimitive<Model> {
     @Override
     public String dataType(Field field, Class fieldType, Database database) throws Exception {
         if (Serial.class.isAssignableFrom(fieldType) && ModelUtil.isForeign(field.getAnnotation(Column.class))) {
-            return database.getMigrationType().bigint();
+            return arrayOrList(field, database.getMigrationType().bigint(), database);
         } else {
-            return database.getMigrationType().text();
+            return arrayOrList(field, database.getMigrationType().text(), database);
         }
     }
 
     @Override
-    public Object castSql(Model model, Field field, Class fieldType, Model obValue) throws Exception {
+    public Object fieldToSql(Model model, Field field, Class fieldType, Object obValue, boolean where) throws Exception {
         if (obValue == null) {
             return null;
         }
@@ -108,31 +107,31 @@ public class CastModel extends CastPrimitive<Model> {
             Long id = ((Serial) obValue).getId();
             if (id == null) {
                 if (column.foreignInsert()) {
-                    obValue.insert();
+                    ((Model)obValue).insert();
                     return ((Serial) obValue).getId();
                 }
             } else {
                 if (column.foreignUpdate()) {
-                    obValue.save();
+                    ((Model)obValue).save();
                     return ((Serial) obValue).getId();
                 }
             }
         }
-        return Serial.class.isAssignableFrom(fieldType) && ModelUtil.isForeign(column) ? ((Serial) obValue).getId() : obValue.toJsonString(true);
+        return Serial.class.isAssignableFrom(fieldType) && ModelUtil.isForeign(column) ? ((Serial) obValue).getId() : ((Model)obValue).toJsonString(true);
     }
 
-    public static Model findOrCreate(Class<? extends Serial> classe, Long id, List<Model> list) throws Exception {
+    public static Model findOrCreate(Class<? extends Serial> classe, Long id, List<Model> list, Database database) throws Exception {
         Model model = null;
         if (id != null) {
             model = find(classe, id, list);
             if (model == null) {
-                model = ((Serial) Model.newInstance((Class<? extends Model>) classe)).get(id);
+                model = Model.query((Class<? extends Model>) classe, database).get(id);
                 list.add(model);
             }
         }
 
         if (model == null) {
-            model = Model.newInstance((Class<? extends Model>) classe);
+            model = Model.newInstance((Class<? extends Model>) classe, database);
             list.add(model);
         }
         return model;

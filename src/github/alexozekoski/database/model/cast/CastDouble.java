@@ -9,6 +9,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonPrimitive;
 import github.alexozekoski.database.Database;
+import github.alexozekoski.database.model.Column;
 import github.alexozekoski.database.model.Model;
 import java.lang.reflect.Field;
 import java.util.List;
@@ -17,14 +18,10 @@ import java.util.List;
  *
  * @author alexo
  */
-public class CastDouble extends CastPrimitive<Double> {
-
-    public CastDouble() {
-        super(Double.class);
-    }
+public class CastDouble extends CastPrimitive {
 
     @Override
-    public Double cast(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
+    public Object sqlToField(Model model, List<Model> stack, Field field, Class fieldType, Object sqlvalue) throws Exception {
         if (sqlvalue == null) {
             return null;
         }
@@ -38,12 +35,12 @@ public class CastDouble extends CastPrimitive<Double> {
     }
 
     @Override
-    public JsonElement json(Model model, Field field, Class fieldType, Double obValue) throws Exception {
-        return obValue == null ? JsonNull.INSTANCE : new JsonPrimitive(obValue);
+    public JsonElement fieldToJson(Model model, Field field, Class fieldType, Object obValue) throws Exception {
+        return obValue == null ? JsonNull.INSTANCE : new JsonPrimitive((double) obValue);
     }
 
     @Override
-    public Double cast(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
+    public Double jsonToField(Model model, List<Model> stack, Field field, Class fieldType, JsonElement value) throws Exception {
         if (value.isJsonNull()) {
             return null;
         }
@@ -52,7 +49,11 @@ public class CastDouble extends CastPrimitive<Double> {
 
     @Override
     public String dataType(Field field, Class fieldType, Database database) throws Exception {
-        return fieldType.isArray() ? super.dataType(field, fieldType, database) : database.getMigrationType().numeric();
+        Column column = field.getAnnotation(Column.class);
+        if (column.numeric() > 0 || column.decimal() > 0) {
+            return database.getMigrationType().decimal(column.decimal() > 0 ? column.decimal() : 10, column.numeric() > 0 ? column.numeric() : 4);
+        }
+        return arrayOrList(field, database.getMigrationType().numeric(), database);
     }
 
 }

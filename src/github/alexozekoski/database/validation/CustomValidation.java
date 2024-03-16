@@ -5,21 +5,31 @@
  */
 package github.alexozekoski.database.validation;
 
-import com.google.gson.JsonElement;
+import github.alexozekoski.database.Log;
+import github.alexozekoski.database.model.Column;
+import github.alexozekoski.database.model.Model;
+import github.alexozekoski.database.validation.primitive.ValidationCustom;
 import java.lang.reflect.Field;
 
 /**
  *
  * @author alexo
- * @param <O>
- * @param <V>
  */
-public interface CustomValidation<O, V> {
+public class CustomValidation implements Validation{
 
-    public boolean validate(O object, V value, Field field) throws Exception;
-
-    public JsonElement message(O object, V value, Field field) throws Exception;
-
-    public int code(O object, V value, Field field) throws Exception;
-
+    @Override
+    public void valid(Model model, Field field, Column column, Object value, Validator validator) {
+        ValidationCustom vc = field.getAnnotation(ValidationCustom.class);
+        if(vc != null){
+            for (Class<? extends Validation> val : vc.value()) {
+                try {
+                    Validation validation = val.newInstance();
+                    validation.valid(model, field, column, value, validator);
+                } catch (Exception ex) {
+                   Log.printError(ex);
+                } 
+            }
+        }
+    }
+    
 }

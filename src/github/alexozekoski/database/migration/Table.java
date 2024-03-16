@@ -5,7 +5,15 @@
  */
 package github.alexozekoski.database.migration;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import github.alexozekoski.database.Database;
+import github.alexozekoski.database.model.Model;
+import github.alexozekoski.database.model.ModelUtil;
+import java.lang.reflect.Field;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  *
@@ -15,16 +23,25 @@ public class Table {
 
     private String name;
 
-    private Column[] colunas = new Column[0];
+    private List<Column> columns = new ArrayList();
 
     private MigrationType migration;
 
     private Database database;
 
-    public Table(String name, MigrationType migration, Database database) {
+    private boolean exists = false;
+
+    public Table(String name, Database database) throws SQLException {
         this.name = name;
-        this.migration = migration;
+        this.migration = database.getMigrationType();
         this.database = database;
+        if (database.hasTable(name)) {
+            exists = true;
+            Column[] cols = database.getColumns(name);
+            for (Column col : cols) {
+                columns.add(col);
+            }
+        }
     }
 
     public void serialModel() {
@@ -110,14 +127,9 @@ public class Table {
     }
 
     private Column add(String col, String type) {
-        Column coluna = new Column(col, type, database.getMigrationType());
-        Column[] colunasTemp = new Column[colunas.length + 1];
-        for (int i = 0; i < colunas.length; i++) {
-            colunasTemp[i] = colunas[i];
-        }
-        colunasTemp[colunas.length] = coluna;
-        colunas = colunasTemp;
-        return coluna;
+        Column column = new Column(col, type, database.getMigrationType(), false);
+        columns.add(column);
+        return column;
     }
 
     public String getName() {
@@ -125,7 +137,7 @@ public class Table {
     }
 
     public Column[] getColumns() {
-        return colunas;
+        return columns.toArray(new Column[columns.size()]);
     }
 
     public Column serialID() {
@@ -134,32 +146,195 @@ public class Table {
 
     @Override
     public String toString() {
-        String text = "";
-        for (Column c : colunas) {
-            if (!text.isEmpty()) {
-                text += ",\n" + c.toString();
-            } else {
-                text += c.toString();
-            }
-        }
-        text = name + " (\n" + text + "\n);";
-        return text;
+        return build().toString();
     }
 
-    public String createQuery() {
+    private StringBuilder build() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("(\n");
+        int p = 1;
+        for (Column c : columns) {
+            sb.append(c.toString());
+            if (p++ != columns.size()) {
+                sb.append(",\n");
+            }
+        }
+        sb.append("\n);");
+        return sb;
+    }
+
+    public String getCreateQuery() {
         return migration.createTable(name) + " " + toString();
     }
 
-    public String dropTableQuery() {
-
+    public String getDropTableQuery() {
         return migration.dropTable(name);
     }
 
-    public boolean create() {
-        return database.executeUpdate(createQuery()) != 0;
+    public String getIndexQuery(String indexName) {
+        List<String> cols = new ArrayList();
+        for (Column col : columns) {
+            if (col.isIndex()) {
+                cols.add(col.getName());
+            }
+        }
+        if (cols.isEmpty()) {
+            return null;
+        }
+        return migration.createIndex(indexName, name, cols.toArray(new String[cols.size()]));
     }
 
-    public boolean dropTable() {
-        return database.executeUpdate(dropTableQuery()) != -1;
+    public Column[] getDeletedColumns() {
+        List<Column> cols = new ArrayList();
+        for (Column col : columns) {
+            if (col.isDeleted()) {
+                cols.add(col);
+            }
+        }
+        return cols.toArray(new Column[cols.size()]);
     }
+
+    public Column[] getNonExistentColumns() {
+        List<Column> cols = new ArrayList();
+        for (Column col : columns) {
+            if (!col.exists()) {
+                cols.add(col);
+            }
+        }
+        return cols.toArray(new Column[cols.size()]);
+    }
+
+    public String getAlterColumnsQuery() {
+        Column[] cols = getNonExistentColumns();
+        if (cols.length == 0) {
+            return null;
+        }
+        return migration.addColumn(this, cols);
+    }
+
+    public String getDropColumnsQuery() {
+        Column[] cols = getDeletedColumns();
+        if (cols.length == 0) {
+            return null;
+        }
+        return migration.dropColumn(this, cols);
+    }
+
+    public boolean alterColumns() throws SQLException {
+        String query = getAlterColumnsQuery();
+        if (query == null) {
+            return false;
+        }
+        database.tryExecuteUpdate(query);
+        for (Column column : columns) {
+            column.setExists(false);
+        }
+        return true;
+    }
+
+    public boolean dropColumns() throws SQLException {
+        String query = getDropColumnsQuery();
+        if (query == null) {
+            return false;
+        }
+        database.tryExecuteUpdate(query);
+        for (Column column : columns) {
+            column.setExists(true);
+        }
+        return true;
+    }
+
+    public void update() throws SQLException {
+        update(true, true, true);
+    }
+
+    public char update(boolean create, boolean add, boolean drop) throws SQLException {
+        if (!exists()) {
+            if (create) {
+                create();
+                return 'C';
+            }
+        } else {
+            if (add) {
+                alterColumns();
+            }
+            if (drop) {
+                dropColumns();
+            }
+            return 'A';
+        }
+        return '0';
+    }
+
+    public boolean create() throws SQLException {
+        boolean ok = database.tryExecuteUpdate(getCreateQuery()) != 0;
+        if (ok) {
+            exists = true;
+            for (Column column : columns) {
+                column.setExists(true);
+            }
+        }
+        return ok;
+    }
+
+    public boolean dropTable() throws SQLException {
+
+        boolean ok = database.tryExecuteUpdate(getDropTableQuery()) != -1;
+        if (ok) {
+            exists = false;
+            for (Column column : columns) {
+                column.setExists(false);
+            }
+        }
+        return ok;
+    }
+
+    public boolean exists() throws SQLException {
+        return exists;
+    }
+
+    public Column[] add(Class< ? extends Model> classe) {
+        Field[] fields = ModelUtil.getMigrationColumns(classe);
+        List<Column> cols = new ArrayList();
+        for (Column column : columns) {
+            column.setDeleted(true);
+        }
+        for (Field field : fields) {
+            github.alexozekoski.database.model.Column col = field.getAnnotation(github.alexozekoski.database.model.Column.class);
+            boolean exist = false;
+            for (Column column : columns) {
+                if (column.getName().equals(col.value())) {
+                    exist = true;
+                    column.setDeleted(false);
+                    break;
+                }
+            }
+            if (!exist) {
+                cols.add(Column.fieldToColumn(this, database, field));
+            }
+        }
+        return cols.toArray(new Column[cols.size()]);
+    }
+
+    public Database getDatabase() {
+        return database;
+    }
+
+    public void setDatabase(Database database) {
+        this.database = database;
+        this.migration = database.getMigrationType();
+    }
+
+    public JsonArray getAllRow() {
+        return database.query().table(name).getAsJsonArray();
+    }
+
+    public JsonObject getAllData() {
+        return database.query().table(name).getAsJsonObject();
+    }
+
+    public String getInsertSql() {
+        return database.query().table(name).getAsInsertSql();
+    }
+
 }

@@ -93,12 +93,12 @@ public class SQLiteMigration implements MigrationType {
 
     @Override
     public String dropTable(String table) {
-        return "DROP TABLE IF EXISTS " + table;
+        return "DROP TABLE IF EXISTS \"" + table + "\"";
     }
 
     @Override
     public String createTable(String table) {
-        return "CREATE TABLE";
+        return "CREATE TABLE \"" + table + "\"";
     }
 
     @Override
@@ -135,24 +135,82 @@ public class SQLiteMigration implements MigrationType {
     }
 
     @Override
-    public String createForeignKey(String index, String table, String column) {
-        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+    public String castTypeSQL(String column, String type, String typeName, int dataType, long size, long precision, long decimal, boolean nullable, boolean autoincrement, String defaultValue) {
+        String dt = java.sql.JDBCType.valueOf(dataType).getName();
+        switch (dataType) {
+            case java.sql.Types.VARCHAR: {
+                return dt + "(" + size + ")";
+            }
+            default: {
+                return dt;
+            }
+        }
     }
 
     @Override
-    public String dropForeignKey(String index, String table, String column) {
-        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+    public Column castTypeSQL(String column, String type, String typeName, int dataType, long size, long precision, long decimal, boolean nullable, boolean autoincrement, String defaultValue, String foreignTable, String foreignColumn) {
+        Column col = new Column(column, castTypeSQL(column, type, typeName, dataType, size, precision, decimal, nullable, autoincrement, defaultValue), this, true);
+        col.nullable(nullable);
+        col.autoincrement(autoincrement);
+        col.setDefaultValue(defaultValue);
+        col.foreignKey(foreignTable, foreignColumn);
+        return col;
     }
 
     @Override
-    public String castTypeSQL(String column, String type, int dataType, long size, long precision, long decimal, boolean nullable, boolean autoincrement, String defaultValue) {
-        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+    public String addColumn(Table table, Column[] cols) {
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (Column col : cols) {
+            if (first) {
+                first = false;
+            } else {
+                sb.append("\n");
+            }
+            sb.append("ALTER TABLE ");
+            sb.append(carrot());
+            sb.append(table.getName());
+            sb.append(carrot());
+            sb.append("\nADD COLUMN ");
+            sb.append(col.toString());
+            sb.append(";");
+        }
+        return sb.toString();
     }
 
     @Override
-    public Column castTypeSQL(String column, String type, int dataType, long size, long precision, long decimal, boolean nullable, boolean autoincrement, String defaultValue, String foreignTable, String foreignColumn) {
-        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+    public String dropColumn(Table table, Column[] cols) {
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (Column col : cols) {
+            if (first) {
+                first = false;
+            } else {
+                sb.append("\n");
+            }
+            sb.append("ALTER TABLE ");
+            sb.append(carrot());
+            sb.append(table.getName());
+            sb.append(carrot());
+            sb.append("\nDROP ");
+            sb.append(col.getName());
+            sb.append(";");
+        }
+        return sb.toString();
     }
 
-  
+    @Override
+    public String carrot() {
+        return "\"";
+    }
+
+    @Override
+    public String byteArray() {
+        return "BLOB";
+    }
+
+    @Override
+    public String blob() {
+        return "BLOB";
+    }
 }

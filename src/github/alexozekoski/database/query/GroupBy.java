@@ -5,6 +5,8 @@
  */
 package github.alexozekoski.database.query;
 
+import github.alexozekoski.database.migration.MigrationType;
+
 /**
  *
  * @author alexozekoski
@@ -15,15 +17,18 @@ public class GroupBy implements Clause {
 
     private String table;
 
-    public GroupBy(Object column, String table) {
+    private MigrationType migrationType;
+
+    public GroupBy(Object column, String table, MigrationType migrationType) {
         this.column = column;
         this.table = table;
+        this.migrationType = migrationType;
     }
 
     @Override
     public String query(char type) {
         if (column instanceof String) {
-            return Query.parseColumn(table, (String) column);
+            return Query.parseColumn(table, (String) column, migrationType);
         }
         return column.toString();
     }
@@ -44,5 +49,10 @@ public class GroupBy implements Clause {
     @Override
     public void setTable(String table) {
         this.table = table;
+    }
+
+    @Override
+    public boolean hasValue(char type) {
+        return false;
     }
 }

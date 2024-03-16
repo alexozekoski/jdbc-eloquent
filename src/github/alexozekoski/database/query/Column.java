@@ -5,6 +5,8 @@
  */
 package github.alexozekoski.database.query;
 
+import github.alexozekoski.database.migration.MigrationType;
+
 /**
  *
  * @author alexo
@@ -14,15 +16,18 @@ public class Column implements Clause {
     private String name;
     
     private String table;
+    
+    private MigrationType migrationType;
 
-    public Column(String name, String table) {
+    public Column(String name, String table, MigrationType migrationType) {
         this.name = name;
         this.table = table;
+        this.migrationType = migrationType;
     }
 
     @Override
     public String query(char type) {
-        return Query.parseColumn(table, name);
+        return Query.parseColumn(table, name, migrationType);
     }
 
     @Override
@@ -41,6 +46,11 @@ public class Column implements Clause {
     @Override
     public void setTable(String table) {
         this.table = table;
+    }
+
+    @Override
+    public boolean hasValue(char type) {
+        return false;
     }
 
 }

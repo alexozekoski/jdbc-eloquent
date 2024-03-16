@@ -54,13 +54,13 @@ public @interface Column {
 
     public String onDelete() default "";
 
-    public int string() default -1;
+    public int varchar() default -1;
 
     public boolean text() default false;
 
     public boolean index() default false;
 
-    public Class<? extends Model> listType() default Model.class;
+    public Class listType() default Object.class;
 
     public String get() default "";
 
@@ -71,8 +71,17 @@ public @interface Column {
     public boolean foreignUpdate() default false;
 
     public boolean foreignDelete() default false;
-    
+
     public boolean foreignFill() default false;
-    
-    public boolean foreignUnique() default false;
+
+    public boolean foreignOnlyObject() default true;
+
+//    public boolean foreignUnique() default false;
+    public boolean validate() default true;
+
+    public int numeric() default -1;
+
+    public int decimal() default -1;
+
+    public boolean join() default false;
 }

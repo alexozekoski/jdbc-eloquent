@@ -9,6 +9,7 @@ import com.google.gson.JsonObject;
 import github.alexozekoski.database.migration.SQLiteMigration;
 import github.alexozekoski.database.migration.MigrationType;
 import java.io.File;
+import java.sql.SQLException;
 
 /**
  *
@@ -17,6 +18,8 @@ import java.io.File;
 public class SQLite extends Database {
 
     public static final String JDBC = "sqlite";
+    
+    public static final String NAME = "SQLite";
 
     public static final MigrationType MIGRATION_TYPE = new SQLiteMigration();
 
@@ -28,6 +31,7 @@ public class SQLite extends Database {
     public SQLite(String database) {
         super(JDBC, null, null, null, null, database);
     }
+
     public SQLite(File file) {
         super(JDBC, null, null, null, null, file.getAbsolutePath());
     }
@@ -47,6 +51,28 @@ public class SQLite extends Database {
 //    
     @Override
     public MigrationType getMigrationType() {
-        return MIGRATION_TYPE; 
+        return MIGRATION_TYPE;
     }
+
+    @Override
+    public boolean tryDropDatabase() throws SQLException {
+        File file = new File(getDatabase());
+        return file.delete();
+    }
+
+    @Override
+    public boolean tryCreateDatabase(String database) throws SQLException {
+        return false;
+    }
+
+    @Override
+    public long length() {
+        return new File(getDatabase()).length();
+    }
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
 }

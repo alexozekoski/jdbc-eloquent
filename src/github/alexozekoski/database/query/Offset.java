@@ -39,4 +39,9 @@ public class Offset implements Clause {
     public void setTable(String table) {
 
     }
+
+    @Override
+    public boolean hasValue(char type) {
+        return true;
+    }
 }

@@ -5,8 +5,13 @@
  */
 package github.alexozekoski.database.migration;
 
+import github.alexozekoski.database.Database;
+import github.alexozekoski.database.Log;
 import github.alexozekoski.database.model.ModelUtil;
 import github.alexozekoski.database.model.Serial;
+import github.alexozekoski.database.model.cast.Cast;
+import java.lang.reflect.Field;
+import java.util.List;
 
 /**
  *
@@ -42,10 +47,63 @@ public class Column {
 
     private boolean index = false;
 
-    public Column(String name, String type, MigrationType types) {
+    private boolean exists;
+
+    private boolean delete = false;
+
+    public static Column fieldToColumn(Table table, Database database, Field field) {
+        github.alexozekoski.database.model.Column col = field.getAnnotation(github.alexozekoski.database.model.Column.class);
+
+        github.alexozekoski.database.migration.Column colmig = null;
+        if (col.serial()) {
+            return table.bigserial(col.value());
+        }
+        if (!col.type().isEmpty()) {
+            colmig = table.custom(col.value(), col.type());
+        } else {
+            String coluna = col.value();
+            try {
+                Class type = field.getType().isArray() ? field.getType().getComponentType() : (List.class.isAssignableFrom(field.getType()) ? col.listType() : field.getType());
+                Cast cast = ModelUtil.getCast(type);
+                if (cast != null) {
+                    String t = cast.dataType(field, type, database);
+                    colmig = table.custom(coluna, t);
+                }
+            } catch (Exception ex) {
+                Log.printError(ex);
+            }
+        }
+
+        if (colmig == null) {
+            return null;
+        }
+        if (col.notnull()) {
+            colmig = colmig.notnull();
+        }
+        if (col.unique()) {
+            colmig = colmig.unique();
+        }
+        if (!col.foreignKey().equals(Serial.class)) {
+            colmig = colmig.foreignKey(col.foreignKey());
+        } else {
+            if (!col.foreign().isEmpty() && !col.key().isEmpty()) {
+                colmig.foreignKey(col.foreign(), col.key());
+            }
+        }
+        if (!col.defaultValue().isEmpty()) {
+            colmig = colmig.defaultValue(col.defaultValue());
+        }
+        if (!col.onDelete().isEmpty()) {
+            colmig.onDelete(col.onDelete());
+        }
+        return colmig;
+    }
+
+    public Column(String name, String type, MigrationType types, boolean exists) {
         this.name = name;
         this.type = type.toUpperCase();
         this.types = types;
+        this.exists = exists;
     }
 
     public Column notnull() {
@@ -233,7 +291,7 @@ public class Column {
             }
         }
         if (foreignTable != null && foreignColumn != null) {
-            row += " REFERENCES " + foreignTable + "(" + foreignColumn + ")";
+            row += " REFERENCES \"" + foreignTable + "\"(" + foreignColumn + ")";
         }
         if (ondelete != null) {
             row += " ON DELETE " + ondelete;
@@ -286,4 +344,21 @@ public class Column {
         setIndex(index);
         return this;
     }
+
+    public boolean exists() {
+        return exists;
+    }
+
+    public void setExists(boolean exists) {
+        this.exists = exists;
+    }
+
+    public boolean isDeleted() {
+        return delete;
+    }
+
+    public void setDeleted(boolean delete) {
+        this.delete = delete;
+    }
+
 }

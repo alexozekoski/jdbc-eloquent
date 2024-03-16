@@ -5,8 +5,12 @@
  */
 package github.alexozekoski.database.query;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import github.alexozekoski.database.Database;
 import github.alexozekoski.database.Log;
+import github.alexozekoski.database.migration.MigrationType;
 import github.alexozekoski.database.model.ModelUtil;
 import java.lang.reflect.Array;
 import java.sql.PreparedStatement;
@@ -30,6 +34,8 @@ public class Query<T extends Query> {
 
     private String table = null;
 
+    private int whereLevel = 0;
+
     public Query(Database database) {
         this.database = database;
     }
@@ -37,6 +43,70 @@ public class Query<T extends Query> {
     public Query(Database database, String table) {
         this.database = database;
         this.table = table;
+    }
+
+    public static String buildRawQuery(Object... values) {
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (Object ob : values) {
+            if (ob != null) {
+                if (ob.getClass().isArray()) {
+                    int size = Array.getLength(ob);
+                    for (int i = 0; i < size; i++) {
+                        if (first) {
+                            sb.append("?");
+                            first = false;
+                        } else {
+                            sb.append(", ?");
+                        }
+                    }
+                    continue;
+                }
+                if (List.class.isInstance(ob)) {
+                    List l = (List) ob;
+                    for (int i = 0; i < l.size(); i++) {
+                        if (first) {
+                            sb.append("?");
+                            first = false;
+                        } else {
+                            sb.append(", ?");
+                        }
+                    }
+                    continue;
+                }
+            }
+            if (first) {
+                sb.append("?");
+                first = false;
+            } else {
+                sb.append(", ?");
+            }
+        }
+        return sb.toString();
+    }
+
+    public static Object[] buildRaw(Object... values) {
+        List<Object> list = new ArrayList();
+        for (Object ob : values) {
+            if (ob != null) {
+                if (ob.getClass().isArray()) {
+                    int size = Array.getLength(ob);
+                    for (int i = 0; i < size; i++) {
+                        list.add(Array.get(ob, i));
+                    }
+                    continue;
+                }
+                if (List.class.isInstance(ob)) {
+                    List l = (List) ob;
+                    for (Object o : l) {
+                        list.add(o);
+                    }
+                    continue;
+                }
+            }
+            list.add(ob);
+        }
+        return list.toArray();
     }
 
     protected List<Clause> getClauses() {
@@ -52,18 +122,18 @@ public class Query<T extends Query> {
 
     public T select(String... columns) {
         for (String column : columns) {
-            clauses.add(new Column(column, table));
+            clauses.add(new Column(column, table, getDatabase().getMigrationType()));
         }
         return (T) this;
     }
-    
-    public T set(String column, Object value){
-        clauses.add(new Set(column, value));
+
+    public T set(String column, Object value) {
+        clauses.add(new Set(column, value, getDatabase().getMigrationType()));
         return (T) this;
     }
 
     public T groupBy(Object column) {
-        clauses.add(new GroupBy(column, table));
+        clauses.add(new GroupBy(column, table, getDatabase().getMigrationType()));
         return (T) this;
     }
 
@@ -83,8 +153,16 @@ public class Query<T extends Query> {
         return join("LEFT JOIN", table, localColumn, foreignColumn);
     }
 
+    public T leftJoin(Class localtable, Class foreignTable, String localColumn, String foreignColumn) {
+        return join("LEFT JOIN", ModelUtil.getTable(localtable), ModelUtil.getTable(foreignTable), localColumn, foreignColumn);
+    }
+
     public T rightJoin(String table, String localColumn, String foreignColumn) {
         return join("RIGHT JOIN", table, localColumn, foreignColumn);
+    }
+
+    public T rightJoin(Class localtable, Class foreignTable, String localColumn, String foreignColumn) {
+        return join("RIGHT JOIN", ModelUtil.getTable(localtable), ModelUtil.getTable(foreignTable), localColumn, foreignColumn);
     }
 
     public T join(String table, String localColumn, String foreignColumn) {
@@ -92,7 +170,19 @@ public class Query<T extends Query> {
     }
 
     public T join(String join, String table, String localColumn, String foreignColumn) {
-        return (T) joinRaw(join, table, localColumn + " = " + foreignColumn);
+        return join(join, this.table, table, localColumn, foreignColumn);
+    }
+
+    public T join(String join, Class localtable, Class foreignTable, String localColumn, String foreignColumn) {
+        return join(join, ModelUtil.getTable(localtable), ModelUtil.getTable(foreignTable), localColumn, foreignColumn);
+    }
+
+    public T join(Class localtable, Class foreignTable, String localColumn, String foreignColumn) {
+        return join("INNER JOIN", ModelUtil.getTable(localtable), ModelUtil.getTable(foreignTable), localColumn, foreignColumn);
+    }
+
+    public T join(String join, String localtable, String foreignTable, String localColumn, String foreignColumn) {
+        return (T) joinRaw(join, foreignTable, Query.parseColumn(localtable, localColumn, getDatabase().getMigrationType()) + " = " + Query.parseColumn(foreignTable, foreignColumn, getDatabase().getMigrationType()));
     }
 
     public T join(Class table, String query) {
@@ -108,16 +198,16 @@ public class Query<T extends Query> {
     }
 
     public T joinRaw(String join, String table, String query) {
-        clauses.add(new Join(join, table, query));
+        clauses.add(new Join(join, table, query, getDatabase().getMigrationType()));
         return (T) this;
     }
 
     public T orWhereRaw(String where, Object... param) {
-        return where("OR", where, "RAW", param, true);
+        return where("OR", where, "RAW", param, true, true);
     }
 
     public T whereRaw(String where, Object... param) {
-        return where("AND", where, "RAW", param, true);
+        return where("AND", where, "RAW", param, true, true);
     }
 
     public T orBetween(String column, Object a, Object b) {
@@ -136,12 +226,12 @@ public class Query<T extends Query> {
     }
 
     public T orderBy(Object column) {
-        clauses.add(new OrderBy(column, "ASC", table));
+        clauses.add(new OrderBy(column, "ASC", table, getDatabase().getMigrationType()));
         return (T) this;
     }
 
     public T orderBy(Object column, String order) {
-        clauses.add(new OrderBy(column, order == null ? "ASC" : order, table));
+        clauses.add(new OrderBy(column, order == null ? "ASC" : order, table, getDatabase().getMigrationType()));
         return (T) this;
     }
 
@@ -170,44 +260,88 @@ public class Query<T extends Query> {
         return (T) this;
     }
 
+    public T table(Class table) {
+        return table(ModelUtil.getTable(table));
+    }
+
     public T table(String table) {
         setTable(table);
         return (T) this;
     }
 
     public T orWhereNotIn(String column, List value) {
-        return orWhere(column, "<>", value);
+        return orWhereValues(column, "<>", value);
     }
 
-    public T orWhereNotIn(String column, Object... values) {
-        return orWhere(column, "<>", values);
+    public T orWhereNotInValues(String column, Object... values) {
+        return orWhereValues(column, "<>", values);
     }
 
     public T whereNotIn(String column, List value) {
         return where(column, "<>", value);
     }
 
-    public T whereNotIn(String column, Object... values) {
+    public T whereNotIn(String column, Object value) {
+        return where(column, "<>", value);
+    }
+
+    public T whereNotInValues(String column, Object... values) {
         return where(column, "<>", values);
     }
 
     public T orWhereIn(String column, List value) {
-        return orWhere(column, value);
+        return orWhereValues(column, value);
     }
 
-    public T orWhereIn(String column, Object... values) {
-        return orWhere(column, values);
+    public T orWhereInValues(String column, Object... values) {
+        return orWhereValues(column, values);
     }
 
     public T whereIn(String column, List value) {
         return where(column, value);
     }
 
-    public T whereIn(String column, Object... values) {
+    public T whereIn(String column, Object value) {
+        return where("AND", column, "=", value);
+    }
+
+    public T whereInValues(String column, Object... values) {
         return where("AND", column, "=", values);
     }
 
-    public T orWhere(String column, Object... values) {
+    public T orIsNull(String column) {
+        return where("OR", column, "IS NULL", null, false, false);
+    }
+
+    public T orIsNotNull(String column) {
+        return where("OR", column, "IS NOT NULL", null, false, false);
+    }
+
+    public T IsNotNull(String column) {
+        return where("AND", column, "IS NOT NULL", null, false, false);
+    }
+
+    public T orIs(String column, Object value) {
+        return where(column, "IS", value);
+    }
+
+    public T isNull(String column) {
+        return where("AND", column, "IS NULL", null, false, false);
+    }
+
+    public T is(String column, Object value) {
+        return where(column, "IS", value);
+    }
+
+    public T orWhere(String column, Object value) {
+        return orWhere(column, "=", value);
+    }
+
+    public T orWhere(String column, String operator, Object value) {
+        return where("OR", column, operator, value);
+    }
+
+    public T orWhereValues(String column, Object... values) {
         return where("OR", column, "=", values);
     }
 
@@ -219,7 +353,19 @@ public class Query<T extends Query> {
         return where("AND", column, operator, value);
     }
 
-    public T where(String prefix, String column, String operator, Object value, boolean raw) {
+    public T openParentheses() {
+        whereLevel++;
+        return (T) this;
+    }
+
+    public T closeParentheses() {
+        if (whereLevel > 0) {
+            whereLevel--;
+        }
+        return (T) this;
+    }
+
+    public T where(String prefix, String column, String operator, Object value, boolean raw, boolean hasValue) {
         if (value != null && value.getClass().isArray() && Array.getLength(value) == 0) {
             return (T) this;
         }
@@ -230,12 +376,12 @@ public class Query<T extends Query> {
             firstWhere = false;
             prefix = null;
         }
-        clauses.add(new Where(prefix, column, operator, value, raw, table));
+        clauses.add(new Where(prefix, column, operator, value, raw, table, getDatabase().getMigrationType(), hasValue, whereLevel));
         return (T) this;
     }
 
     public T where(String prefix, String column, String operator, Object value) {
-        return where(prefix, column, operator, value, false);
+        return where(prefix, column, operator, value, false, true);
     }
 
     public Object[] buildParam(char type) {
@@ -253,8 +399,11 @@ public class Query<T extends Query> {
         }
 
         buildParam(type, Where.class, clauses, param);
-        //addParam(param, find(GroupBy.class));
-        //addParam(param, find(OrderBy.class));
+//        if (type == 'S') {
+//            addParam(param, find(GroupBy.class));
+//            addParam(param, find(OrderBy.class));
+//        }
+
         buildParam(type, Limit.class, clauses, param);
         buildParam(type, Offset.class, clauses, param);
         return param.toArray();
@@ -269,7 +418,7 @@ public class Query<T extends Query> {
     }
 
     protected void buildWhere(StringBuilder sql, char type) {
-        buildQuery(type, sql, " WHERE", Where.class, clauses, " ", " ");
+        buildWhere(type, sql, clauses);
     }
 
     protected void buildOffset(StringBuilder sql, char type) {
@@ -286,7 +435,7 @@ public class Query<T extends Query> {
 
     protected void buildTable(StringBuilder sql) {;
         sql.append(" FROM ");
-        sql.append("`").append(table).append("`");
+        sql.append(database.getMigrationType().carrot()).append(table).append(database.getMigrationType().carrot());
     }
 
     protected void buildSelect(StringBuilder sql) {
@@ -298,7 +447,7 @@ public class Query<T extends Query> {
 
     protected void buildUpdate(StringBuilder sql) {
         sql.append("UPDATE ");
-       sql.append("`").append(table).append("`");
+        sql.append(database.getMigrationType().carrot()).append(table).append(database.getMigrationType().carrot());
         sql.append(" SET");
         buildQuery('U', sql, null, Set.class, clauses, " ", ", ");
 
@@ -306,7 +455,7 @@ public class Query<T extends Query> {
 
     protected void buildInsert(StringBuilder sql) {
         sql.append("INSERT INTO ");
-        sql.append("`").append(table).append("`");
+        sql.append(database.getMigrationType().carrot()).append(table).append(database.getMigrationType().carrot());
         int t = buildQuery('I', sql, " (", Set.class, clauses, "", ", ");
         sql.append(") VALUES (");
         for (int i = 0; i < t; i++) {
@@ -361,65 +510,26 @@ public class Query<T extends Query> {
         return sql;
     }
 
-    public PreparedStatement toStatement(char type) throws SQLException {
-        PreparedStatement stmt = database.createStatement(build(type).toString(), buildParam(type));
-        stmt.closeOnCompletion();
-        return stmt;
-    }
-
     public String toString(char type) {
-        try {
-            PreparedStatement stmt = toStatement(type);
-            stmt.close();
-            return stmt.toString();
-        } catch (SQLException ex) {
-            Log.printError(ex);
-            return super.toString();
-        }
+        return build(type).toString();
     }
 
     @Override
     public String toString() {
-        return toString('I');
+        return toString('S');
     }
 
-//    @Override
-//    public String toString() {
-//        String query = build();
-//
-//        Object[] param = buildParam(buildTable());
-//        //    int skip = find(Column.class).size() + find(Table.class).size();
-//        int max = whereSize();
-//        int p = 0;
-//        for (Object object : param) {
-//            String val = object == null ? "null" : object.toString();
-//            if ((object instanceof String && p < max) || object instanceof Timestamp || object instanceof Date || object instanceof JsonElement) {
-//                val = "'" + val.replace("'", "''") + "'";
-//            }
-//            p++;
-//            query = query.replaceFirst("\\?", val);
-//        }
-//        return query;
-//    }
     public void reset() {
         clauses.clear();
         firstWhere = true;
     }
 
-    public static String parseColumn(String table, String col) {;
-        return parseColumn(table, col, true);
-    }
-
-    public static String parseColumn(String table, String col, boolean carrot) {
+    public static String parseColumn(String table, String col, MigrationType type) {
         if (!col.matches("\\w+")) {
             return col;
         } else {
-            String pref = table != null ? table + "." : "";
-            if (carrot) {
-                col = pref + "`" + col + "`";
-            } else {
-                col = pref + col;
-            }
+            String pref = table != null ? type.carrot() + table + type.carrot() + "." : "";
+            col = pref + type.carrot() + col + type.carrot();
             return col;
         }
     }
@@ -427,23 +537,24 @@ public class Query<T extends Query> {
     private static void buildParam(char type, List<Clause> clauses, List<Object> objects) {
         for (Clause clause : clauses) {
 
-            Object value = clause.value(type);
-            if (value != null) {
-                if (value.getClass().isArray()) {
-                    for (int i = 0; i < Array.getLength(value); i++) {
-                        objects.add(Array.get(value, i));
-                    }
-                } else if (value instanceof List) {
-                    List list = (List) value;
-
-                    for (int i = 0; i < list.size(); i++) {
-                        objects.add(list.get(i));
+            if (clause.hasValue(type)) {
+                Object value = clause.value(type);
+                if (value != null) {
+                    if (value.getClass().isArray()) {
+                        for (int i = 0; i < Array.getLength(value); i++) {
+                            objects.add(Array.get(value, i));
+                        }
+                    } else if (value instanceof List) {
+                        List list = (List) value;
+                        list.forEach((item) -> {
+                            objects.add(item);
+                        });
+                    } else {
+                        objects.add(value);
                     }
                 } else {
                     objects.add(value);
                 }
-            } else {
-                objects.add(value);
             }
         }
 
@@ -464,21 +575,65 @@ public class Query<T extends Query> {
     }
 
     private static List<Clause> remove(Class<? extends Clause> classe, List<Clause> clauses) {
-        List<Clause> list = new ArrayList<>();
-        clauses.removeIf(classe::isInstance);
-        return list;
+        List<Clause> removed = new ArrayList();
+        for (int i = 0; i < clauses.size(); i++) {
+            if (classe.isInstance(clauses.get(i))) {
+                removed.add(clauses.remove(i));
+                i--;
+            }
+        }
+        return removed;
+    }
+
+    private static int buildWhere(char type, StringBuilder sql, List<Clause> clauses) {
+        List<Clause> filt = find(Where.class, clauses);
+        if (filt.isEmpty()) {
+            return 0;
+        }
+        sql.append(" WHERE ");
+        int last = 0;
+        for (Clause clause : filt) {
+            boolean usedPrefix = false;
+            Where where = (Where) clause;
+            String prefix = where.getPrefix();
+            if (where.getLevel() > last) {
+                if (prefix != null) {
+                    usedPrefix = true;
+                    sql.append(" ");
+                    sql.append(prefix);
+                    sql.append(" ");
+                }
+                for (int i = last; i < where.getLevel(); i++) {
+                    sql.append("(");
+                }
+            }
+            if (where.getLevel() < last) {
+                sql.append(")");
+            }
+            if (!usedPrefix && prefix != null) {
+                sql.append(" ");
+                sql.append(prefix);
+                sql.append(" ");
+            }
+            sql.append(clause.query(type));
+            last = where.getLevel();
+        }
+        for (int i = 0; i < last; i++) {
+            sql.append(")");
+        }
+        return filt.size();
     }
 
     private static int buildQuery(char type, StringBuilder sql, String clause, Class<? extends Clause> cla, List<Clause> clauses, String p1, String p2) {
-        List<Clause> wheres = find(cla, clauses);
-        if (wheres.isEmpty()) {
+        List<Clause> filt = find(cla, clauses);
+        if (filt.isEmpty()) {
             return 0;
         }
         if (clause != null) {
             sql.append(clause);
         }
 
-        return buildQuery(type, sql, wheres, p1, p2);
+        return buildQuery(type, sql, filt, p1, p2);
     }
 
     private static int buildQuery(char type, StringBuilder sql, List<Clause> clauses, String p1, String p2) {
@@ -515,8 +670,8 @@ public class Query<T extends Query> {
         this.table = table;
     }
 
-    public void clearSelects() {
-        remove(Column.class, clauses);
+    public List<Clause> clearSelects() {
+        return remove(Column.class, clauses);
     }
 
     public void clearSets() {
@@ -527,8 +682,8 @@ public class Query<T extends Query> {
         return database.tryExecuteReturnigGeneratedKeys(build('I').toString(), buildParam('I'));
     }
 
-    public ResultSet tryExecuteUpdate() throws SQLException {
-        return database.tryExecuteReturnigGeneratedKeys(build('U').toString(), buildParam('U'));
+    public long tryExecuteUpdate() throws SQLException {
+        return database.tryExecuteUpdate(build('U').toString(), buildParam('U'));
     }
 
     public ResultSet tryExecuteSelect() throws SQLException {
@@ -539,27 +694,53 @@ public class Query<T extends Query> {
         return database.tryExecuteUpdate(build('D').toString(), buildParam('D'));
     }
 
+    public long delete() {
+        try {
+            return tryExecuteDelete();
+        } catch (Exception ex) {
+            Log.printError(ex);
+            return -1;
+        }
+    }
+
+    public long update() {
+        try {
+            return tryExecuteUpdate();
+        } catch (Exception ex) {
+            Log.printError(ex);
+            return -1;
+        }
+    }
+
     public long tryCountDistinct(String column) throws SQLException {
         long value = 0;
-        clearSelects();
-        select("SELECT DISTINCT count(\"" + column + "\")");
+        List<Clause> rem = clearSelects();
+        select("DISTINCT count(" + getDatabase().getMigrationType().carrot() + column + getDatabase().getMigrationType().carrot() + ")");
         ResultSet res = tryExecuteSelect();
         if (res.next()) {
             value = res.getLong(1);
         }
         res.close();
+        clearSelects();
+        for (Clause c : rem) {
+            getClauses().add(c);
+        }
         return value;
     }
 
     public long tryCount() throws SQLException {
         long value = 0;
-        clearSelects();
-        select("SELECT count(*)");
+        List<Clause> rem = clearSelects();
+        select("count(*)");
         ResultSet res = tryExecuteSelect();
         if (res.next()) {
             value = res.getLong(1);
         }
         res.close();
+        clearSelects();
+        for (Clause c : rem) {
+            getClauses().add(c);
+        }
         return value;
     }
 
@@ -579,5 +760,72 @@ public class Query<T extends Query> {
             Log.printError(ex);
         }
         return -1;
+    }
+
+    public JsonArray getAsJsonArray() {
+        return database.executeAsJson(build('S').toString(), buildParam('S'));
+    }
+
+    public JsonObject getAsJsonObject() {
+        return database.executeAsJsonObject(build('S').toString(), buildParam('S'));
+    }
+
+    public String getAsInsertSql() {
+        JsonObject data = getAsJsonObject();
+        if (data != null) {
+            JsonArray head = data.getAsJsonArray("head");
+            JsonArray body = data.getAsJsonArray("body");
+            if (body.size() == 0) {
+                return null;
+            }
+            StringBuilder sb = new StringBuilder("INSERT INTO ");
+            sb.append(database.getMigrationType().carrot());
+            sb.append(getTable());
+            sb.append(database.getMigrationType().carrot());
+            sb.append("(");
+            for (int i = 0; i < head.size(); i++) {
+                String col = head.get(i).getAsString();
+                if (i > 0) {
+                    sb.append(" ,");
+                }
+                sb.append(database.getMigrationType().carrot());
+                sb.append(col);
+                sb.append(database.getMigrationType().carrot());
+
+            }
+            sb.append(")");
+            sb.append(" VALUES\n");
+            for (int i = 0; i < body.size(); i++) {
+                if (i > 0) {
+                    sb.append(",\n");
+                }
+                sb.append("(");
+                JsonObject ob = body.get(i).getAsJsonObject();
+                for (int j = 0; j < head.size(); j++) {
+
+                    String col = head.get(j).getAsString();
+                    JsonElement value = ob.get(col);
+                    if (j > 0) {
+                        sb.append(" ,");
+                    }
+                    if (value.isJsonNull()) {
+                        sb.append("null");
+                    } else if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean()) {
+                        sb.append(value.getAsBoolean());
+                    } else if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()) {
+                        sb.append(value.getAsNumber());
+                    } else {
+                        sb.append("'");
+                        sb.append(value.getAsString());
+                        sb.append("'");
+                    }
+                }
+                sb.append(")");
+            }
+            sb.append(";");
+            return sb.toString();
+        } else {
+            return null;
+        }
     }
 }

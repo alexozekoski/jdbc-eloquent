@@ -16,7 +16,7 @@ public interface Serial<T extends Model> {
 
     public void setId(Long id);
     
-    public T get(Long id);
+//    public T get(Long id);;
     
     public boolean equals(Long id);
 

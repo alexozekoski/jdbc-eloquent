@@ -13,7 +13,9 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Statement;
 
 /**
  *
@@ -22,6 +24,8 @@ import java.sql.SQLException;
 public class PostgreSQL extends Database {
 
     public static final String JDBC = "postgresql";
+
+    public static final String NAME = "PostgreSQL";
 
     public static final MigrationType MIGRATION_TYPE = new PostgresSQLMigration();
 
@@ -77,12 +81,34 @@ public class PostgreSQL extends Database {
     }
 
     @Override
-    public JsonArray getDatabases() throws SQLException {
-        JsonArray databases = executeAsJsonArray("SELECT datname as name FROM pg_database;");
+    public JsonArray getDatabasesAsJson() throws SQLException {
+        JsonArray databases = executeAsJson("SELECT datname as name FROM pg_database;");
         for (int i = 0; i < databases.size(); i++) {
             databases.set(i, databases.get(i).getAsJsonObject().get("name"));
         }
         return databases;
+    }
+
+    @Override
+    public long length() {
+        JsonArray array = executeAsJson("SELECT pg_database_size('" + getDatabase() + "')");
+        if (array.size() > 0) {
+            return array.get(0).getAsJsonObject().get("pg_database_size").getAsLong();
+        }
+        return super.length();
+    }
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
+    @Override
+    protected String queryToSqlString(String query, Statement statement, Object... param) {
+        if(PreparedStatement.class.isInstance(statement)){
+            return statement.toString(); 
+        }
+        return super.queryToSqlString(query, statement, param);
     }
 
 }

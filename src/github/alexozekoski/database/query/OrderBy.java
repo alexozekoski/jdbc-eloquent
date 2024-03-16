@@ -5,6 +5,8 @@
  */
 package github.alexozekoski.database.query;
 
+import github.alexozekoski.database.migration.MigrationType;
+
 /**
  *
  * @author alexozekoski
@@ -14,17 +16,19 @@ public class OrderBy implements Clause {
     private Object column;
     private String dir;
     private String table;
+    private MigrationType migrationType;
 
-    public OrderBy(Object column, String dir, String table) {
+    public OrderBy(Object column, String dir, String table, MigrationType migrationType) {
         this.column = column;
         this.dir = dir;
         this.table = table;
+        this.migrationType = migrationType;
     }
 
     @Override
     public String query(char type) {
         if (column instanceof String) {
-            return Query.parseColumn(table, (String) column) + " " + dir;
+            return Query.parseColumn(table, (String) column, migrationType) + " " + dir;
         }
         return column.toString() + " " + dir;
     }
@@ -42,8 +46,13 @@ public class OrderBy implements Clause {
         this.column = column;
     }
 
-       @Override
+    @Override
     public void setTable(String table) {
-           this.table = table;
+        this.table = table;
+    }
+
+    @Override
+    public boolean hasValue(char type) {
+        return false;
     }
 }

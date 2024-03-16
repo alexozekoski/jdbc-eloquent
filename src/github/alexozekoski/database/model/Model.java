@@ -5,8 +5,6 @@
  */
 package github.alexozekoski.database.model;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.lang.reflect.Field;
@@ -18,9 +16,10 @@ import github.alexozekoski.database.Database;
 import github.alexozekoski.database.Log;
 import github.alexozekoski.database.query.Query;
 import github.alexozekoski.database.query.QueryModel;
-import github.alexozekoski.database.validation.Validation;
-import github.alexozekoski.database.validation.Validator;
 import java.lang.reflect.Constructor;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  *
@@ -33,9 +32,12 @@ public class Model<T extends Model<T>> {
 
     private Database database = DEFAULT_DATABASE;
 
-    private ModelAction<T> action = null;
+    // private ModelAction<T> action = null;
+    public static int DEFAULT_VARCHAR_SIZE = 255;
 
     private boolean debugger;
+
+    public static final Map<Class<? extends Model>, List<ModelAction>> LISTENERS = Collections.synchronizedMap(new HashMap());
 
     public Model() {
 
@@ -45,9 +47,6 @@ public class Model<T extends Model<T>> {
         this.database = database;
     }
 
-//    public Model(Object... values) {
-//        create(values);
-//    }
     public Model(JsonObject values) {
         create(values);
     }
@@ -80,9 +79,13 @@ public class Model<T extends Model<T>> {
     public static <M extends Model> M tryNewInstance(Class<M> classe, Database database) throws Exception {
         Constructor constructor;
         if (database != null) {
-            constructor = classe.getConstructor(Database.class);
-            if (constructor != null) {
-                return (M) constructor.newInstance(database);
+            try {
+                constructor = classe.getConstructor(Database.class);
+                if (constructor != null) {
+                    return (M) constructor.newInstance(database);
+                }
+            } catch (Exception ex) {
+
             }
         }
         constructor = classe.getConstructor();
@@ -94,6 +97,36 @@ public class Model<T extends Model<T>> {
             return model;
         }
         throw new Exception("A constructor without arguments or with database was not found");
+    }
+
+    public static <M extends Model> void addListener(Class<M> model, ModelAction<M> action) {
+        synchronized (LISTENERS) {
+            List<ModelAction> actions = LISTENERS.get(model);
+            if (actions == null) {
+                actions = Collections.synchronizedList(new ArrayList());
+                LISTENERS.put(model, actions);
+            }
+            actions.add(action);
+        }
+    }
+
+    public static <M extends Model> List<ModelAction> getListeners(Class<M> model) {
+        synchronized (LISTENERS) {
+            List<ModelAction> actions = LISTENERS.get(model);
+            if (actions == null) {
+                actions = Collections.synchronizedList(new ArrayList());
+                LISTENERS.put(model, actions);
+            }
+            return actions;
+        }
+    }
+
+    public void addListener(ModelAction action) {
+        addListener(this.getClass(), action);
+    }
+
+    public List<ModelAction> getListeners() {
+        return getListeners(this.getClass());
     }
 
     public String table() {
@@ -117,7 +150,7 @@ public class Model<T extends Model<T>> {
             if (field.getAnnotation(Column.class
             ) != null) {
                 valores[total++] = Query.parseColumn(table, ((Column) field.getAnnotation(Column.class
-                )).value(), false);
+                )).value(), getDatabase().getMigrationType());
             }
         }
         return valores;
@@ -133,6 +166,10 @@ public class Model<T extends Model<T>> {
 
     public T set(JsonObject json) {
         return set(json, false, false, false, true);
+    }
+
+    public T set(JsonObject json, boolean forceFill) {
+        return set(json, false, false, false, !forceFill);
     }
 
     public T update(JsonObject json) {
@@ -152,20 +189,30 @@ public class Model<T extends Model<T>> {
         }
     }
 
-//    private void set(Field field, JsonElement value) throws IllegalArgumentException, IllegalAccessException {
-//        Object ob = ModelUtil.getField(field, value);
-//        field.set(this, ob);
-//    }
-//    public boolean canFill(Field field, Column column) {
-//        return column.fill();
-//    }
     public void onFill(JsonObject json) {
 
     }
 
+    public T clone() {
+        T model = (T) newInstance(getClass(), getDatabase());
+        model.copy((T) this);
+        return model;
+    }
+
+    public void copy(T model) {
+        try {
+            Field[] fields = ModelUtil.getAllColumns(getClass());
+            for (Field field : fields) {
+                field.set(this, field.get(model));
+            }
+        } catch (Exception e) {
+            Log.printError(e);
+        }
+    }
+
     public T set(JsonObject json, boolean insert, boolean update, boolean select, boolean fill) {
         try {
-            Field[] campos = ModelUtil.getAllColumns(getClass(), insert, update, select, fill);
+            Field[] campos = ModelUtil.getAllColumns(getClass(), insert, update, select, fill, false);
             List<Model> stack = new ArrayList();
 
             for (Field campo : campos) {
@@ -185,93 +232,85 @@ public class Model<T extends Model<T>> {
         return (T) this;
     }
 
-//    public T create(Object... values) {
-//        try {
-//            set(values);
-//            insert();
-//        } catch (Exception e) {
-//            Log.printError(e);
-//            return null;
-//        }
-//        return (T) this;
-//    }
-//    public T set(Object... valores) {
-//        try {
-//            for (int i = 0; i < valores.length; i += 2) {
-//                String column = (String) valores[i];
-//                Object value = valores[i + 1];
-//                set(column, value);
-//            }
-//        } catch (Exception e) {
-//            Log.printError(e);
-//        }
-//        return (T) this;
-//    }
     public String toJsonString() {
         return toJsonString(false);
     }
 
     public String toJsonString(boolean formated) {
         if (formated) {
-            Gson gson = new GsonBuilder()
-                    .setPrettyPrinting()
-                    .serializeNulls()
-                    .create();
-            return gson.toJson(toJson());
+            return ModelUtil.toJsonFormatted(toJson());
         } else {
             return toJson().toString();
         }
+    }
+
+    public JsonObject toJson(JsonObject args) {
+        return toJson();
+    }
+
+    public JsonObject toJson(String... columns) {
+        return toJson(false, columns);
     }
 
     public JsonObject toJson() {
         return toJson(false);
     }
 
-    public JsonObject toJson(boolean force) {
-        return ModelUtil.toJson(this, force);
+    public JsonObject toJson(boolean force, String... columns) {
+        return ModelUtil.toJson(this, force, columns);
     }
 
-    public T save() {
+    public JsonObject onToJson(JsonObject data, boolean force, String... columns) {
+        return data;
+    }
+
+    public boolean save() {
         if (!update()) {
             if (!insert()) {
-                return null;
+                return false;
             }
+            return false;
         }
-        return (T) this;
+        return true;
     }
 
-//    public T set(String column, Object value) {
-//        Field[] campos = getAllColumns();
-//        for (Field campo : campos) {
-//            Column col = ((Column) campo.getAnnotation(Column.class));
-//            String coluna = col.value();
-//            if (coluna.equals(column)) {
-//                try {
-//                    return set(campo, col, value);
-//                } catch (Exception ex) {
-//                    Log.printError(ex);
-//                }
-//            }
-//        }
-//        return (T) this;
-//    }
-//    public T set(QueryModel query, Field field, Column col, Object value) throws Exception {
-//        String coluna = col.value();
-//        for (Cast cast : CASTS) {
-//            Class classe = field.getType();
-//            if (cast.type(field, classe, value).isAssignableFrom(classe)) {
-//                query.set(coluna, cast.castSql(field, value));
-//                break;
-//            }
-//        }
-//        return (T) this;
-//    }
+    public boolean insert(String... columns) {
+        try {
+            ModelUtil.insert(this, columns);
+            return true;
+        } catch (Exception ex) {
+            Log.printError(ex);
+            return false;
+        }
+    }
+
+    public void tryInsert() throws Exception {
+        tryInsert(new String[0]);
+    }
+
+    public void tryInsert(String... columns) throws Exception {
+        ModelUtil.insert(this, columns);
+    }
+
     public boolean insert() {
-        return ModelUtil.insert(this);
+        return insert(new String[0]);
+    }
+
+    public boolean tryUpdate(String... columns) throws Exception {
+        return ModelUtil.update(this, columns);
     }
 
     public boolean update() {
-        return ModelUtil.update(this);
+        return update(new String[0]);
+    }
+
+    public boolean update(String... columns) {
+        try {
+            return tryUpdate(columns);
+        } catch (Exception ex) {
+            Log.printError(ex);
+        }
+        return false;
     }
 
     public void fill(ResultSet res) throws SQLException, IllegalArgumentException, IllegalAccessException {
@@ -286,18 +325,18 @@ public class Model<T extends Model<T>> {
             for (Field key : primary) {
                 Column col = key.getAnnotation(Column.class
                 );
-                query.where(col.value(), ModelUtil.getQuery(this, key));
+                query.where(col.value(), ModelUtil.getQuery(this, key, true));
             }
             onDelete();
-            if (action != null) {
-                action.onDelete((T) this);
-            }
+//            if (action != null) {
+//                action.onDelete((T) this);
+//            }
             boolean res = query.tryExecuteDelete() > 0;
             if (res) {
                 afterDelete();
-                if (action != null) {
-                    action.afterDelete((T) this);
-                }
+//                if (action != null) {
+//                    action.afterDelete((T) this);
+//                }
             }
             return res;
         } catch (Exception e) {
@@ -311,35 +350,59 @@ public class Model<T extends Model<T>> {
     }
 
     public void onUpdate() {
-
+        List<ModelAction> actions = getListeners();
+        actions.forEach((action) -> {
+            action.onUpdate(this);
+        });
     }
 
     public void onCreate() {
-
+        List<ModelAction> actions = getListeners();
+        actions.forEach((action) -> {
+            action.onCreate(this);
+        });
     }
 
     public void onDelete() {
-
+        List<ModelAction> actions = getListeners();
+        actions.forEach((action) -> {
+            action.onDelete(this);
+        });
     }
 
     public void onSelect() {
-
+        List<ModelAction> actions = getListeners();
+        actions.forEach((action) -> {
+            action.onSelect(this);
+        });
     }
 
     public void afterSelect() {
-
+        List<ModelAction> actions = getListeners();
+        actions.forEach((action) -> {
+            action.afterSelect(this);
+        });
     }
 
     public void afterUpdate() {
-
+        List<ModelAction> actions = getListeners();
+        actions.forEach((action) -> {
+            action.afterUpdate(this);
+        });
     }
 
     public void afterCreate() {
-
+        List<ModelAction> actions = getListeners();
+        actions.forEach((action) -> {
+            action.afterCreate(this);
+        });
     }
 
     public void afterDelete() {
-
+        List<ModelAction> actions = getListeners();
+        actions.forEach((action) -> {
+            action.afterDelete(this);
+        });
     }
 
     public Database getDatabase() {
@@ -359,35 +422,6 @@ public class Model<T extends Model<T>> {
         return query().countDistinct(colmun);
     }
 
-//    @Override
-//    public String build() {
-//        String res;
-//        switch (mode) {
-//            case 'S':
-//                res = buildSelect(buildTable()) + super.build();
-//                break;
-//            case 'I':
-//                res = buildInsert() + super.build();
-//                break;
-//            case 'D':
-//                res = buildDelete() + super.build();
-//                break;
-//            case 'C':
-//                res = buildCount() + super.build();
-//                break;
-//            default:
-//                res = buildUpdate(buildTable()) + super.build();
-//                break;
-//        }
-//        if (debugger) {
-//            System.out.println(res);
-//            Object[] param = buildParam();
-//            for (Object ob : param) {
-//                System.out.println(" --" + ob);
-//            }
-//        }
-//        return res;
-//    }
     public boolean isDebugger() {
         return debugger;
     }
@@ -397,116 +431,55 @@ public class Model<T extends Model<T>> {
         return (T) this;
     }
 
-    public github.alexozekoski.database.migration.Table migrate() {
+    public github.alexozekoski.database.migration.Table migrate() throws SQLException {
         return getDatabase().migrate(this.getClass());
     }
 
-    public boolean validationFiled(String[] values, String type, Field field) {
-        for (String value : values) {
-            return type == null || value.isEmpty() || type.equals("*") || value.equals("*") || value.contains(type);
-        }
-        return false;
-    }
-
-    private Field[] allValidationColumns(String type) {
-        int total = 0;
-
-        for (Field field : getClass().getFields()) {
-            Validation[] validations = field.getAnnotationsByType(Validation.class
-            );
-            for (Validation validation : validations) {
-                boolean vlid = validationFiled(validation.value(), type, field);
-                if (vlid) {
-                    total++;
-                }
-            }
-        }
-        Field[] valores = new Field[total];
-        total = 0;
-
-        for (Field field : getClass().getFields()) {
-            Validation[] validations = field.getAnnotationsByType(Validation.class
-            );
-            for (Validation validation : validations) {
-                boolean vlid = validationFiled(validation.value(), type, field);
-                if (vlid) {
-                    valores[total++] = field;
-                }
-            }
-        }
-        return valores;
-    }
-
-    public JsonObject getErrors(String type) {
-        Field[] campos = allValidationColumns(type);
-        JsonObject validJson = new JsonObject();
-        try {
-            for (Field campo : campos) {
-                String nome = campo.getName();
-                Column col = campo.getAnnotation(Column.class
-                );
-                if (col != null) {
-                    nome = col.value();
-                }
-                Object value = ModelUtil.getObject(this, campo);
-
-                try {
-                    Validation[] validations = campo.getAnnotationsByType(Validation.class
-                    );
-                    for (Validation validation : validations) {
-                        String[] val = validation.value();
-                        if (validationFiled(val, type, campo)) {
-                            JsonObject erro = Validator.validField(validation, campo, this, value, getDatabase());
-                            if (erro != null) {
-                                validJson.add(nome, erro);
-                            }
-                        }
-                    }
-                } catch (Exception ex) {
-                    Log.printError(ex);
-                }
-            }
-        } catch (Exception e) {
-            Log.printError(e);
-        }
-        if (action != null) {
-            action.getErrors((T) this, validJson, type);
-        }
-        return validJson.keySet().size() > 0 ? validJson : null;
-    }
-
-    public String getErrorsAsString(String type) {
-        return getErrors(type).toString();
-    }
-
-    public String getErrorsAsString(String type, boolean formated) {
-        if (formated) {
-            Gson gson = new GsonBuilder()
-                    .setPrettyPrinting()
-                    .serializeNulls()
-                    .disableHtmlEscaping()
-                    .create();
-            return gson.toJson(getErrors(type));
-        } else {
-            return getErrorsAsString(type);
-        }
-    }
-
-    public ModelAction<T> getAction() {
-        return action;
-    }
-
-    public void setAction(ModelAction<T> action) {
-        this.action = action;
-    }
-
+//    public ModelAction<T> getAction() {
+//        return action;
+//    }
+//
+//    public void setAction(ModelAction<T> action) {
+//        this.action = action;
+//    }
     @Override
     public String toString() {
         return toJsonString(true);
     }
 
-    public Field[] getAllColumns(boolean insert, boolean update, boolean select, boolean fill) {
-        return ModelUtil.getAllColumns(this.getClass(), insert, update, select, fill);
+    public Field[] getAllColumns(boolean insert, boolean update, boolean select, boolean fill, boolean validate) {
+        return ModelUtil.getAllColumns(this.getClass(), insert, update, select, fill, validate);
+    }
+
+    public JsonObject validate(String... columns) {
+        return ModelUtil.validate(this, columns);
+    }
+
+    public String validateToString() {
+        return ModelUtil.toJsonFormatted(validate());
+    }
+
+    public void tryRefresh() throws Exception {
+        tryRefresh((String[]) null);
+    }
+
+    public boolean refresh(String... columns) {
+        try {
+            ModelUtil.refresh(this, columns);
+            return true;
+        } catch (Exception ex) {
+            Log.printError(ex);
+            return false;
+        }
+    }
+
+    public void tryRefresh(String... columns) throws Exception {
+        ModelUtil.refresh(this, columns);
+    }
+
+    @Override
+    public int hashCode() {
+        return ModelUtil.hashCode(this);
     }
 
 }

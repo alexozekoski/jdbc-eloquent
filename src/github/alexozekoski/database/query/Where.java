@@ -5,6 +5,7 @@
  */
 package github.alexozekoski.database.query;
 
+import github.alexozekoski.database.migration.MigrationType;
 import java.lang.reflect.Array;
 import java.util.List;
 
@@ -19,29 +20,35 @@ public class Where implements Clause {
     private Object value;
     private String prefix;
     private boolean raw = false;
-
+    private final MigrationType migrationType;
     private String table;
+    private boolean hasValue;
+    private int level;
+//;
+//    public Where(String prefix, String column, String operator, Object value, String table, MigrationType migrationType) {
+//        this.column = column;
+//        this.operator = operator;
+//        this.value = value;
+//        this.prefix = prefix;
+//        this.table = table;
+//        this.migrationType = migrationType;
+//    }
 
-    public Where(String prefix, String column, String operator, Object value, String table) {
-        this.column = column;
-        this.operator = operator;
-        this.value = value;
-        this.prefix = prefix;
-        this.table = table;
-    }
-
-    public Where(String prefix, String column, String operator, Object value, boolean raw, String table) {
+    public Where(String prefix, String column, String operator, Object value, boolean raw, String table, MigrationType migrationType, boolean hasValue, int level) {
         this.column = column;
         this.operator = operator;
         this.value = value;
         this.prefix = prefix;
         this.raw = raw;
         this.table = table;
+        this.migrationType = migrationType;
+        this.hasValue = hasValue;
+        this.level = level;
     }
 
     @Override
     public String query(char type) {
-        String where = raw ? column : Query.parseColumn(table, column);
+        String where = raw ? column : Query.parseColumn(table, column, migrationType);
         if (value != null && value.getClass().isArray()) {
             if (!raw) {
                 if (operator.equals("BETWEEN")) {
@@ -70,12 +77,17 @@ public class Where implements Clause {
             }
             where += " " + (operator.equals("=") ? "IN" : "NOT IN") + " (" + param + ")";
         } else {
-            where += " " + operator + " ?";
+            if (!hasValue(type)) {
+                where += " " + operator;
+            } else {
+                where += " " + operator + " ?";
+            }
+
         }
 
-        if (prefix != null) {
-            where = prefix + " " + where;
-        }
+//        if (prefix != null) {;
+//            where = prefix + " " + where;
+//        }
 
         return where;
     }
@@ -121,4 +133,18 @@ public class Where implements Clause {
     public void setTable(String table) {
         this.table = table;
     }
+
+    @Override
+    public boolean hasValue(char type) {
+        return hasValue;
+    }
+
+    public int getLevel() {
+        return level;
+    }
+
+    public void setLevel(int level) {
+        this.level = level;
+    }
+
 }
