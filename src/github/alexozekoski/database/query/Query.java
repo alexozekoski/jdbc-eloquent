@@ -9,11 +9,11 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import github.alexozekoski.database.Database;
+import github.alexozekoski.database.DatabaseResultset;
 import github.alexozekoski.database.Log;
 import github.alexozekoski.database.migration.MigrationType;
 import github.alexozekoski.database.model.ModelUtil;
 import java.lang.reflect.Array;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -317,7 +317,7 @@ public class Query<T extends Query> {
         return where("OR", column, "IS NOT NULL", null, false, false);
     }
 
-    public T IsNotNull(String column) {
+    public T isNotNull(String column) {
         return where("AND", column, "IS NOT NULL", null, false, false);
     }
 
@@ -445,6 +445,13 @@ public class Query<T extends Query> {
         }
     }
 
+    protected void buildSelectDistinct(StringBuilder sql) {
+        int t = buildQuery('S', sql, "SELECT DISTINCT", Column.class, clauses, " ", ", ");
+        if (t == 0) {
+            sql.append("SELECT *");
+        }
+    }
+
     protected void buildUpdate(StringBuilder sql) {
         sql.append("UPDATE ");
         sql.append(database.getMigrationType().carrot()).append(table).append(database.getMigrationType().carrot());
@@ -487,6 +494,11 @@ public class Query<T extends Query> {
             }
             case 'I': {
                 buildInsert(sql);
+                break;
+            }
+            case 'C': {
+                buildSelectDistinct(sql);
+                buildTable(sql);
                 break;
             }
             default: {
@@ -678,16 +690,20 @@ public class Query<T extends Query> {
         remove(Set.class, clauses);
     }
 
-    public ResultSet tryExecuteInsert() throws SQLException {
-        return database.tryExecuteReturnigGeneratedKeys(build('I').toString(), buildParam('I'));
+    public void tryExecuteInsert(DatabaseResultset callback) throws SQLException, Exception {
+        database.tryExecuteReturnigGeneratedKeys(callback, build('I').toString(), buildParam('I'));
     }
 
     public long tryExecuteUpdate() throws SQLException {
         return database.tryExecuteUpdate(build('U').toString(), buildParam('U'));
     }
 
-    public ResultSet tryExecuteSelect() throws SQLException {
-        return database.tryExecute(build('S').toString(), buildParam('S'));
+    public void tryExecuteSelect(DatabaseResultset callback) throws SQLException, Exception {
+        database.tryExecute(callback, build('S').toString(), buildParam('S'));
+    }
+
+    public void tryExecuteSelectDistinct(DatabaseResultset callback) throws SQLException, Exception {
+        database.tryExecute(callback, build('C').toString(), buildParam('S'));
     }
 
     public long tryExecuteDelete() throws SQLException {
@@ -712,36 +728,36 @@ public class Query<T extends Query> {
         }
     }
 
-    public long tryCountDistinct(String column) throws SQLException {
-        long value = 0;
+    public long tryCountDistinct(String column) throws SQLException, Exception {
+        long[] value = new long[1];
         List<Clause> rem = clearSelects();
         select("DISTINCT count(" + getDatabase().getMigrationType().carrot() + column + getDatabase().getMigrationType().carrot() + ")");
-        ResultSet res = tryExecuteSelect();
-        if (res.next()) {
-            value = res.getLong(1);
-        }
-        res.close();
+        tryExecuteSelect((res) -> {
+            if (res.next()) {
+                value[0] = res.getLong(1);
+            }
+        });
         clearSelects();
         for (Clause c : rem) {
             getClauses().add(c);
         }
-        return value;
+        return value[0];
     }
 
-    public long tryCount() throws SQLException {
-        long value = 0;
+    public long tryCount() throws SQLException, Exception {
+        long[] value = new long[1];
         List<Clause> rem = clearSelects();
         select("count(*)");
-        ResultSet res = tryExecuteSelect();
-        if (res.next()) {
-            value = res.getLong(1);
-        }
-        res.close();
+        tryExecuteSelect((res) -> {
+            if (res.next()) {
+                value[0] = res.getLong(1);
+            }
+        });
         clearSelects();
         for (Clause c : rem) {
             getClauses().add(c);
         }
-        return value;
+        return value[0];
     }
 
     public long countDistinct(String column) {
@@ -760,6 +776,14 @@ public class Query<T extends Query> {
             Log.printError(ex);
         }
         return -1;
+    }
+
+    public JsonArray getDistinctAsJsonArray() {
+        return database.executeAsJson(build('C').toString(), buildParam('S'));
+    }
+
+    public JsonObject getDistinctAsJsonObject() {
+        return database.executeAsJsonObject(build('C').toString(), buildParam('S'));
     }
 
     public JsonArray getAsJsonArray() {

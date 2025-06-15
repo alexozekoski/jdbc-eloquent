@@ -7,6 +7,7 @@ package github.alexozekoski.database;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import github.alexozekoski.database.migration.MigrationType;
 
 /**
  *
@@ -66,6 +67,21 @@ public class FirebirdSQL extends Database {
     @Override
     public String getName() {
         return NAME;
+    }
+
+    @Override
+    public MigrationType getMigrationType() {
+        throw new UnsupportedOperationException("Not supported yet."); // Generated from nbfs://nbhost/SystemFileSystem/Templates/Classes/Code/GeneratedMethodBody
+    }
+
+    @Override
+    public Long getNextSequecialId(String table, String column) {
+        throw new UnsupportedOperationException("Not supported yet."); // Generated from nbfs://nbhost/SystemFileSystem/Templates/Classes/Code/GeneratedMethodBody
+    }
+
+    @Override
+    public long length() {
+        throw new UnsupportedOperationException("Not supported yet."); // Generated from nbfs://nbhost/SystemFileSystem/Templates/Classes/Code/GeneratedMethodBody
     }
 
 }

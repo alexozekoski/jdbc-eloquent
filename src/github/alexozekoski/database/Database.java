@@ -46,6 +46,11 @@ public abstract class Database {
     private String password;
     private String database;
     private Integer port;
+    private String applicationName;
+    private int connectTimeout = 30;
+    private int socketTimeout = 60;
+    private int loginTimeout = 30;
+    private int maxReconnectAttempts = 10;
 
     private Properties props;
 
@@ -61,11 +66,11 @@ public abstract class Database {
 
         try {
             Class.forName("org.postgresql.Driver");
-            Class.forName("com.mysql.jdbc.Driver");
-            Class.forName("org.firebirdsql.jdbc.FirebirdDriver");
+            //Class.forName("com.mysql.jdbc.Driver");
+            //Class.forName("org.firebirdsql.jdbc.FirebirdDriver");
             Class.forName("org.sqlite.JDBC");
-            Class.forName("oracle.jdbc.driver.OracleDriver");
-            Class.forName("org.mariadb.jdbc.Driver");
+           // Class.forName("oracle.jdbc.driver.OracleDriver");
+           // Class.forName("org.mariadb.jdbc.Driver");
         } catch (ClassNotFoundException ex) {
             Log.printError(ex);
         }
@@ -146,7 +151,7 @@ public abstract class Database {
         return value;
     }
 
-    public PreparedStatement createPreparedStatement(String query, boolean returnKeys, Object... param) throws SQLException {
+    private PreparedStatement createPreparedStatement(String query, boolean returnKeys, Object... param) throws SQLException {
         PreparedStatement stmt;
         if (returnKeys) {
             stmt = con.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
@@ -170,7 +175,7 @@ public abstract class Database {
         return stmt;
     }
 
-    public Statement createStatement(String query) throws SQLException {
+    private Statement createStatement(String query) throws SQLException {
 
         Statement st = con.createStatement();
         st.closeOnCompletion();
@@ -186,10 +191,6 @@ public abstract class Database {
 
     public Connection getJdbcConnection() {
         return con;
-    }
-
-    public void setJdbcConnection(Connection con) {
-        this.con = con;
     }
 
     protected Database(JsonObject json) {
@@ -222,6 +223,18 @@ public abstract class Database {
         this.password = getAsString(json.get("password"));
         this.database = getAsString(json.get("database"));
         this.port = getAsInt(json.get("port"));
+        if (json.has("connect_timeout")) {
+            this.connectTimeout = getAsInt(json.get("connect_timeout"));
+        }
+        if (json.has("login_timeout")) {
+            this.loginTimeout = getAsInt(json.get("login_timeout"));
+        }
+        if (json.has("socket_timeout")) {
+            this.socketTimeout = getAsInt(json.get("socket_timeout"));
+        }
+        if (json.has("application_name")) {
+            this.applicationName = getAsString(json.get("application_name"));
+        }
         if (json.has("debugger")) {
             setDebugger(json.get("debugger").getAsBoolean());
         }
@@ -365,12 +378,13 @@ public abstract class Database {
         if (con != null && !con.isClosed()) {
             con.close();
         }
-        if (props != null) {
 
-            con = tryConnectWithProps(url, props);
-        } else {
-            con = DriverManager.getConnection(url, user, password);
+        if (props == null) {
+            props = new Properties();
         }
+        url = getConnectUrl(url, props);
+        getConnectProps(url, props);
+        con = tryConnectWithProps(url, props);
         con.setReadOnly(readOnly);
         con.setAutoCommit(false);
     }
@@ -383,6 +397,14 @@ public abstract class Database {
             props.put("password", password);
         }
         return DriverManager.getConnection(url, props);
+    }
+
+    protected String getConnectUrl(String url, Properties props) {
+        return url;
+    }
+
+    protected void getConnectProps(String url, Properties props) {
+
     }
 
     public void tryConnectOrCreateDatabase() throws SQLException {
@@ -510,7 +532,7 @@ public abstract class Database {
     public JsonObject executeAsJsonObject(String query) {
         try {
             return tryExecuteAsJsonObject(query);
-        } catch (SQLException e) {
+        } catch (Exception e) {
             Log.printError(e);
             return null;
         }
@@ -522,47 +544,41 @@ public abstract class Database {
      * SQL inject
      * @throws java.sql.SQLException
      */
-    public JsonObject tryExecuteAsJsonObject(String query) throws SQLException {
+    public JsonObject tryExecuteAsJsonObject(String query) throws SQLException, Exception {
         JsonArray json = new JsonArray();
         JsonArray head = new JsonArray();
-        ResultSet resultSet = tryExecute(query);
-        if (resultSet != null) {
-            try {
-                ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
-                for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
-                    head.add(resultSetMetaData.getColumnLabel(col));
-
-                }
-                while (resultSet.next()) {
-                    JsonObject linha = new JsonObject();
-
+        tryExecute((resultSet) -> {
+            if (resultSet != null) {
+                try {
+                    ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
                     for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
-                        Object value = resultSet.getObject(col);
-                        if (value == null) {
-                            linha.add(resultSetMetaData.getColumnLabel(col), JsonNull.INSTANCE);
-                        } else if (Number.class.isInstance(value)) {
-                            linha.addProperty(resultSetMetaData.getColumnLabel(col), (Number) value);
-                        } else if (Boolean.class.isInstance(value)) {
-                            linha.addProperty(resultSetMetaData.getColumnLabel(col), (Boolean) value);
-                        } else if (Date.class.isInstance(value)) {
-                            linha.add(resultSetMetaData.getColumnLabel(col), CastUtil.toJson((Date) value));
-                        } else {
-                            linha.addProperty(resultSetMetaData.getColumnLabel(col), value.toString());
-                        }
-                    }
-                    json.add(linha);
-                }
-            } catch (SQLException e) {
-                resultSet.close();
-                throw e;
-            }
+                        head.add(resultSetMetaData.getColumnLabel(col));
 
-            try {
-                resultSet.close();
-            } catch (SQLException e) {
-                throw e;
+                    }
+                    while (resultSet.next()) {
+                        JsonObject linha = new JsonObject();
+
+                        for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
+                            Object value = resultSet.getObject(col);
+                            if (value == null) {
+                                linha.add(resultSetMetaData.getColumnLabel(col), JsonNull.INSTANCE);
+                            } else if (Number.class.isInstance(value)) {
+                                linha.addProperty(resultSetMetaData.getColumnLabel(col), (Number) value);
+                            } else if (Boolean.class.isInstance(value)) {
+                                linha.addProperty(resultSetMetaData.getColumnLabel(col), (Boolean) value);
+                            } else if (Date.class.isInstance(value)) {
+                                linha.add(resultSetMetaData.getColumnLabel(col), CastUtil.toJson((Date) value));
+                            } else {
+                                linha.addProperty(resultSetMetaData.getColumnLabel(col), value.toString());
+                            }
+                        }
+                        json.add(linha);
+                    }
+                } catch (SQLException e) {
+                    throw e;
+                }
             }
-        }
+        }, query);
 
         JsonObject ob = new JsonObject();
         ob.add("head", head);
@@ -585,10 +601,9 @@ public abstract class Database {
      * inject
      */
     public JsonObject executeAsJsonObject(String query, Object... objects) {
-
         try {
             return tryExecuteAsJsonObject(query, objects);
-        } catch (SQLException ex) {
+        } catch (Exception ex) {
             Log.printError(ex);
             return null;
         }
@@ -605,48 +620,42 @@ public abstract class Database {
      * inject
      * @throws java.sql.SQLException
      */
-    public JsonObject tryExecuteAsJsonObject(String query, Object... objects) throws SQLException {
+    public JsonObject tryExecuteAsJsonObject(String query, Object... objects) throws SQLException, Exception {
         JsonArray json = new JsonArray();
         JsonArray head = new JsonArray();
-
-        ResultSet resultSet = execute(query, objects);
-        if (resultSet != null) {
-            try {
-                ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
-                for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
-                    head.add(resultSetMetaData.getColumnLabel(col));
-                }
-                while (resultSet.next()) {
-                    JsonObject linha = new JsonObject();
-
+        tryExecute((resultSet) -> {
+            if (resultSet != null) {
+                try {
+                    ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
                     for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
-                        Object value = resultSet.getObject(col);
-                        if (value == null) {
-                            linha.add(resultSetMetaData.getColumnLabel(col), JsonNull.INSTANCE);
-                        } else if (Number.class.isInstance(value)) {
-                            linha.addProperty(resultSetMetaData.getColumnLabel(col), (Number) value);
-                        } else if (Boolean.class.isInstance(value)) {
-                            linha.addProperty(resultSetMetaData.getColumnLabel(col), (Boolean) value);
-                        } else if (Date.class.isInstance(value)) {
-                            linha.add(resultSetMetaData.getColumnLabel(col), CastUtil.toJson((Date) value));
-                        } else {
-                            linha.addProperty(resultSetMetaData.getColumnLabel(col), value.toString());
-                        }
-
+                        head.add(resultSetMetaData.getColumnLabel(col));
                     }
-                    json.add(linha);
-                }
-            } catch (SQLException e) {
-                resultSet.close();
-                throw e;
-            }
+                    while (resultSet.next()) {
+                        JsonObject linha = new JsonObject();
 
-            try {
-                resultSet.close();
-            } catch (SQLException e) {
-                throw e;
+                        for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
+                            Object value = resultSet.getObject(col);
+                            if (value == null) {
+                                linha.add(resultSetMetaData.getColumnLabel(col), JsonNull.INSTANCE);
+                            } else if (Number.class.isInstance(value)) {
+                                linha.addProperty(resultSetMetaData.getColumnLabel(col), (Number) value);
+                            } else if (Boolean.class.isInstance(value)) {
+                                linha.addProperty(resultSetMetaData.getColumnLabel(col), (Boolean) value);
+                            } else if (Date.class.isInstance(value)) {
+                                linha.add(resultSetMetaData.getColumnLabel(col), CastUtil.toJson((Date) value));
+                            } else {
+                                linha.addProperty(resultSetMetaData.getColumnLabel(col), value.toString());
+                            }
+
+                        }
+                        json.add(linha);
+                    }
+                } catch (SQLException e) {
+                    throw e;
+                }
             }
-        }
+        }, query, objects);
+
         JsonObject ob = new JsonObject();
         ob.add("head", head);
         ob.add("body", json);
@@ -654,28 +663,15 @@ public abstract class Database {
     }
 
     /**
+     * @param callback
      * @param query SQL defaul query,
-     * @return returns an ResultSet of keys generated can be null if nothing is
-     * generated, not a safe method SQL inject, the resulset must be closed
-     * after use.
-     */
-    public ResultSet executeReturnigGeneratedKeys(String query) {
-        try {
-            return tryExecuteReturnigGeneratedKeys(query);
-        } catch (SQLException ex) {
-            Log.printError(ex);
-            return null;
-        }
-    }
-
-    /**
-     * @param query SQL defaul query,
-     * @return returns an ResultSet of keys generated can be null if nothing is
-     * generated, not a safe method SQL inject, the resulset must be closed
-     * after use.
      * @throws java.sql.SQLException
      */
-    public ResultSet tryExecuteReturnigGeneratedKeys(String query) throws SQLException {
+    public void tryExecuteReturnigGeneratedKeys(DatabaseResultset callback, String query) throws SQLException, Exception {
+        tryExecuteReturnigGeneratedKeys(callback, query, 0);
+    }
+
+    private void tryExecuteReturnigGeneratedKeys(DatabaseResultset callback, String query, int attempts) throws SQLException, Exception {
         try {
             Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
             Statement stmt = createStatement(query);
@@ -698,12 +694,20 @@ public abstract class Database {
             if (resultSet == null) {
                 stmt.close();
             }
-            return resultSet;
+            try {
+                callback.run(resultSet);
+            } catch (Exception ex) {
+                throw ex;
+            } finally {
+                if (resultSet != null) {
+                    resultSet.close();
+                }
+            }
 
         } catch (SQLException ex) {
-            if (!isConnected() && autoreconnect) {
+            if (!isConnected() && autoreconnect && attempts < maxReconnectAttempts) {
                 tryReconnect();
-                return tryExecuteReturnigGeneratedKeys(query);
+                tryExecuteReturnigGeneratedKeys(callback, query, attempts + 1);
             } else {
                 throw ex;
             }
@@ -719,7 +723,7 @@ public abstract class Database {
     public JsonObject executeReturnigGeneratedKeysAsJson(String query) {
         try {
             return tryExecuteReturnigGeneratedKeysAsJson(query);
-        } catch (SQLException e) {
+        } catch (Exception e) {
             Log.printError(e);
             return null;
         }
@@ -732,39 +736,34 @@ public abstract class Database {
      * inject
      * @throws java.sql.SQLException
      */
-    public JsonObject tryExecuteReturnigGeneratedKeysAsJson(String query) throws SQLException {
+    public JsonObject tryExecuteReturnigGeneratedKeysAsJson(String query) throws SQLException, Exception {
         JsonObject json = new JsonObject();
-        ResultSet resultSet = executeReturnigGeneratedKeys(query);
-        if (resultSet != null) {
-
-            try {
-                ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
-                if (resultSet.next()) {
-                    for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
-                        Object value = resultSet.getObject(col);
-                        if (value == null) {
-                            json.add(resultSetMetaData.getColumnLabel(col), JsonNull.INSTANCE);
-                        } else if (Number.class.isInstance(value)) {
-                            json.addProperty(resultSetMetaData.getColumnLabel(col), (Number) value);
-                        } else if (Boolean.class.isInstance(value)) {
-                            json.addProperty(resultSetMetaData.getColumnLabel(col), (Boolean) value);
-                        } else if (Date.class.isInstance(value)) {
-                            json.add(resultSetMetaData.getColumnLabel(col), CastUtil.toJson((Date) value));
-                        } else {
-                            json.addProperty(resultSetMetaData.getColumnLabel(col), value.toString());
+        tryExecuteReturnigGeneratedKeys((resultSet) -> {
+            if (resultSet != null) {
+                try {
+                    ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
+                    if (resultSet.next()) {
+                        for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
+                            Object value = resultSet.getObject(col);
+                            if (value == null) {
+                                json.add(resultSetMetaData.getColumnLabel(col), JsonNull.INSTANCE);
+                            } else if (Number.class.isInstance(value)) {
+                                json.addProperty(resultSetMetaData.getColumnLabel(col), (Number) value);
+                            } else if (Boolean.class.isInstance(value)) {
+                                json.addProperty(resultSetMetaData.getColumnLabel(col), (Boolean) value);
+                            } else if (Date.class.isInstance(value)) {
+                                json.add(resultSetMetaData.getColumnLabel(col), CastUtil.toJson((Date) value));
+                            } else {
+                                json.addProperty(resultSetMetaData.getColumnLabel(col), value.toString());
+                            }
                         }
                     }
+                } catch (SQLException e) {
+                    throw e;
                 }
-            } catch (SQLException e) {
-                resultSet.close();
-                throw e;
             }
-            try {
-                resultSet.close();
-            } catch (SQLException e) {
-                throw e;
-            }
-        }
+        }, query);
+
         return json;
     }
 
@@ -779,7 +778,7 @@ public abstract class Database {
     public JsonObject executeReturnigGeneratedKeysAsJson(String query, Object... param) {
         try {
             return tryExecuteReturnigGeneratedKeysAsJson(query, param);
-        } catch (SQLException e) {
+        } catch (Exception e) {
             Log.printError(e);
             return null;
         }
@@ -794,39 +793,27 @@ public abstract class Database {
      * the resulset must be closed after use.
      * @throws java.sql.SQLException
      */
-    public JsonObject tryExecuteReturnigGeneratedKeysAsJson(String query, Object... param) throws SQLException {
+    public JsonObject tryExecuteReturnigGeneratedKeysAsJson(String query, Object... param) throws SQLException, Exception {
         JsonObject json = new JsonObject();
-        ResultSet resultSet = tryExecuteReturnigGeneratedKeys(query, param);
-        if (resultSet != null) {
-
-            try {
+        tryExecuteReturnigGeneratedKeys((resultSet) -> {
+            if (resultSet != null) {
                 ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
                 if (resultSet.next()) {
-
                     for (int col = 1; col <= resultSetMetaData.getColumnCount(); col++) {
                         Object value = resultSet.getObject(col);
                         json.add(resultSetMetaData.getColumnLabel(col), CastUtil.sqlToJson(value));
                     }
                 }
-            } catch (SQLException e) {
-                resultSet.close();
-                if (!isConnected() && autoreconnect) {
-                    tryReconnect();
-                    return tryExecuteReturnigGeneratedKeysAsJson(query, param);
-                } else {
-                    throw e;
-                }
             }
-            try {
-                resultSet.close();
-            } catch (SQLException e) {
-                throw e;
-            }
-        }
+        }, query, param);
         return json;
     }
 
-    public ResultSet tryExecuteReturnigGeneratedKeys(String query, Object... param) throws SQLException {
+    public void tryExecuteReturnigGeneratedKeys(DatabaseResultset callback, String query, Object... param) throws SQLException, Exception {
+        tryExecuteReturnigGeneratedKeys(callback, query, 0, param);
+    }
+
+    private void tryExecuteReturnigGeneratedKeys(DatabaseResultset callback, String query, int attempts, Object... param) throws SQLException, Exception {
         try {
             Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
             PreparedStatement stmt = createPreparedStatement(query, true, param);
@@ -852,12 +839,20 @@ public abstract class Database {
                 stmt.close();
             }
 
-            return resultSet;
+            try {
+                callback.run(resultSet);
+            } catch (Exception ex) {
+                throw ex;
+            } finally {
+                if (resultSet != null) {
+                    resultSet.close();
+                }
+            }
 
         } catch (SQLException ex) {
-            if (!isConnected() && autoreconnect) {
+            if (!isConnected() && autoreconnect && attempts < maxReconnectAttempts) {
                 tryReconnect();
-                return tryExecuteReturnigGeneratedKeys(query, param);
+                tryExecuteReturnigGeneratedKeys(callback, query, attempts + 1, param);
             } else {
                 throw ex;
             }
@@ -866,28 +861,16 @@ public abstract class Database {
     }
 
     /**
+     * @param callback
      * @param query SQL default query, use ? in the query to reference an object
      * of the objects,
-     * @return returns an JsonObject of keys generated,not safe method SQL
-     * inject, the resulset must be closed after use.
-     */
-    public ResultSet execute(String query) {
-        try {
-            return tryExecute(query);
-        } catch (SQLException e) {
-            Log.printError(e);
-            return null;
-        }
-    }
-
-    /**
-     * @param query SQL default query, use ? in the query to reference an object
-     * of the objects,
-     * @return returns an JsonObject of keys generated,not safe method SQL
-     * inject, the resulset must be closed after use.
      * @throws java.sql.SQLException
      */
-    public ResultSet tryExecute(String query) throws SQLException {
+    public void tryExecute(DatabaseResultset callback, String query) throws SQLException, Exception {
+        tryExecute(callback, query, 0);
+    }
+
+    private void tryExecute(DatabaseResultset callback, String query, int attempts) throws SQLException, Exception {
         try {
             Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
             Statement stmt = createStatement(query);
@@ -910,12 +893,19 @@ public abstract class Database {
             if (resultSet == null) {
                 stmt.close();
             }
-            return resultSet;
-
+            try {
+                callback.run(resultSet);
+            } catch (Exception ex) {
+                throw ex;
+            } finally {
+                if (resultSet != null) {
+                    resultSet.close();
+                }
+            }
         } catch (SQLException ex) {
-            if (!isConnected() && autoreconnect) {
+            if (!isConnected() && autoreconnect && attempts < maxReconnectAttempts) {
                 tryReconnect();
-                return tryExecute(query);
+                tryExecute(callback, query, attempts + 1);
             } else {
                 throw ex;
             }
@@ -923,32 +913,18 @@ public abstract class Database {
     }
 
     /**
+     * @param callback
      * @param param are the standard JDBC SQL primitive objects, String, int,
      * double, byte, Timestamp, Time, long
      * @param query SQL default query, use ? in the query to reference an object
      * of the objects,
-     * @return returns an JsonObject of keys generated,safe method SQL inject,
-     * the resulset must be closed after use.
-     */
-    public ResultSet execute(String query, Object... param) {
-        try {
-            return tryExecute(query, param);
-        } catch (SQLException e) {
-            Log.printError(e);
-            return null;
-        }
-    }
-
-    /**
-     * @param param are the standard JDBC SQL primitive objects, String, int,
-     * double, byte, Timestamp, Time, long
-     * @param query SQL default query, use ? in the query to reference an object
-     * of the objects,
-     * @return returns an JsonObject of keys generated,safe method SQL inject,
-     * the resulset must be closed after use.
      * @throws java.sql.SQLException
      */
-    public ResultSet tryExecute(String query, Object... param) throws SQLException {
+    public void tryExecute(DatabaseResultset callback, String query, Object... param) throws SQLException, Exception {
+        tryExecute(callback, query, 0, param);
+    }
+
+    private void tryExecute(DatabaseResultset callback, String query, int attempts, Object... param) throws SQLException, Exception {
         try {
             Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
             PreparedStatement stmt = createPreparedStatement(query, false, param);
@@ -970,13 +946,19 @@ public abstract class Database {
             if (resultSet == null) {
                 stmt.close();
             }
-
-            return resultSet;
-
+            try {
+                callback.run(resultSet);
+            } catch (Exception ex) {
+                throw ex;
+            } finally {
+                if (resultSet != null) {
+                    resultSet.close();
+                }
+            }
         } catch (SQLException ex) {
-            if (!isConnected() && autoreconnect) {
+            if (!isConnected() && autoreconnect && attempts < maxReconnectAttempts) {
                 tryReconnect();
-                return tryExecute(query, param);
+                tryExecute(callback, query, attempts + 1, param);
             } else {
                 throw ex;
             }
@@ -1002,6 +984,10 @@ public abstract class Database {
     }
 
     public int tryExecuteUpdate(String query, Object... param) throws SQLException {
+        return tryExecuteUpdate(query, 0, param);
+    }
+
+    private int tryExecuteUpdate(String query, int attempts, Object... param) throws SQLException {
         try {
             Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
             PreparedStatement stmt = createPreparedStatement(query, false, param);
@@ -1024,9 +1010,9 @@ public abstract class Database {
             return total;
 
         } catch (SQLException ex) {
-            if (!isConnected() && autoreconnect) {
+            if (!isConnected() && autoreconnect && attempts < maxReconnectAttempts) {
                 tryReconnect();
-                return tryExecuteUpdate(query, param);
+                return tryExecuteUpdate(query, attempts + 1, param);
             } else {
                 throw ex;
             }
@@ -1036,7 +1022,6 @@ public abstract class Database {
     public boolean executeVoid(String query) {
         try {
             return tryExecuteVoid(query);
-
         } catch (SQLException ex) {
             Log.printError(ex);
             return false;
@@ -1044,6 +1029,10 @@ public abstract class Database {
     }
 
     public boolean tryExecuteVoid(String query) throws SQLException {
+        return tryExecuteVoid(query, 0);
+    }
+
+    private boolean tryExecuteVoid(String query, int attempts) throws SQLException {
         try {
             Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
             Statement stmt = createStatement(query);
@@ -1067,9 +1056,9 @@ public abstract class Database {
             return exe;
 
         } catch (SQLException ex) {
-            if (!isConnected() && autoreconnect) {
+            if (!isConnected() && autoreconnect && attempts < maxReconnectAttempts) {
                 tryReconnect();
-                return tryExecuteVoid(query);
+                return tryExecuteVoid(query, attempts + 1);
             } else {
                 throw ex;
             }
@@ -1087,6 +1076,10 @@ public abstract class Database {
     }
 
     public boolean tryExecuteVoid(String query, Object... param) throws SQLException {
+        return tryExecuteVoid(query, 0, param);
+    }
+
+    private boolean tryExecuteVoid(String query, int attempts, Object... param) throws SQLException {
         try {
             Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
             PreparedStatement stmt = createPreparedStatement(query, false, param);
@@ -1109,9 +1102,9 @@ public abstract class Database {
             return res;
 
         } catch (SQLException ex) {
-            if (!isConnected() && autoreconnect) {
+            if (!isConnected() && autoreconnect && attempts < maxReconnectAttempts) {
                 tryReconnect();
-                return tryExecuteVoid(query, param);
+                return tryExecuteVoid(query, attempts + 1, param);
             } else {
                 throw ex;
             }
@@ -1119,6 +1112,10 @@ public abstract class Database {
     }
 
     public int tryExecuteUpdate(String query) throws SQLException {
+        return tryExecuteUpdate(query, 0);
+    }
+
+    private int tryExecuteUpdate(String query, int attempts) throws SQLException {
         try {
             Savepoint savepoint = getConnection().getAutoCommit() ? null : getConnection().setSavepoint();
             Statement stmt = createStatement(query);
@@ -1142,9 +1139,9 @@ public abstract class Database {
             return total;
 
         } catch (SQLException ex) {
-            if (!isConnected() && autoreconnect) {
+            if (!isConnected() && autoreconnect && attempts < maxReconnectAttempts) {
                 tryReconnect();
-                return tryExecuteUpdate(query);
+                return tryExecuteUpdate(query, attempts + 1);
             } else {
                 throw ex;
             }
@@ -1156,6 +1153,7 @@ public abstract class Database {
      * "table 1", "table 2" ]
      *
      * @return JsonArray
+     * @throws java.sql.SQLException
      */
     public JsonArray getTablesAsJson() throws SQLException {
         String[] types = {"TABLE"};
@@ -1338,17 +1336,31 @@ public abstract class Database {
         return table;
     }
 
-    public MigrationType getMigrationType() {
-        return null;
+    public abstract MigrationType getMigrationType();
+
+    public Long getNextSequecialId(Class table, String column) {
+        return getNextSequecialId(ModelUtil.getTable(table), column);
     }
 
-    public boolean tryExecuteFile(File sql) throws IOException, SQLException {
+    public Long getNextSequecialId(Class table) {
+        return getNextSequecialId(table, "id");
+    }
 
+    public Long getNextSequecialId(String table) {
+        return getNextSequecialId(table, "id");
+    }
+
+    public abstract Long getNextSequecialId(String table, String column);
+
+    public boolean tryExecuteFile(File sql) throws IOException, SQLException {
         FileInputStream in = new FileInputStream(sql);
-        byte[] buffer = new byte[(int) sql.length()];
-        in.read(buffer);
-        in.close();
-        return tryExecuteVoid(new String(buffer));
+        try {
+            byte[] buffer = new byte[(int) sql.length()];
+            in.read(buffer);
+            return tryExecuteVoid(new String(buffer));
+        } finally {
+            in.close();
+        }
     }
 
     public boolean executeFile(File sql) {
@@ -1487,12 +1499,12 @@ public abstract class Database {
         return json;
     }
 
-    public Connection getConnection() {
-        return con;
-    }
-
     public <M extends Model<M>> QueryModel<M> query(Class<M> classe) {
         return new QueryModel<>(classe, this);
+    }
+
+    public Connection getConnection() {
+        return con;
     }
 
     public boolean isDebugger() {
@@ -1507,13 +1519,9 @@ public abstract class Database {
         this.con = con;
     }
 
-    public long length() {
-        return -1;
-    }
+    public abstract long length();
 
-    public String getName() {
-        return "Unknown";
-    }
+    public abstract String getName();
 
     public boolean isAutoreconnect() {
         return autoreconnect;
@@ -1521,6 +1529,54 @@ public abstract class Database {
 
     public void setAutoreconnect(boolean autoreconnect) {
         this.autoreconnect = autoreconnect;
+    }
+
+    public String getApplicationName() {
+        return applicationName;
+    }
+
+    public void setApplicationName(String applicationName) {
+        this.applicationName = applicationName;
+    }
+
+    public int getConnectTimeout() {
+        return connectTimeout;
+    }
+
+    public void setConnectTimeout(int connectTimeout) {
+        this.connectTimeout = connectTimeout;
+    }
+
+    public int getSocketTimeout() {
+        return socketTimeout;
+    }
+
+    public void setSocketTimeout(int socketTimeout) {
+        this.socketTimeout = socketTimeout;
+    }
+
+    public int getLoginTimeout() {
+        return loginTimeout;
+    }
+
+    public void setLoginTimeout(int loginTimeout) {
+        this.loginTimeout = loginTimeout;
+    }
+
+    public Properties getProps() {
+        return props;
+    }
+
+    public void setProps(Properties props) {
+        this.props = props;
+    }
+
+    public int getMaxReconnectAttempts() {
+        return maxReconnectAttempts;
+    }
+
+    public void setMaxReconnectAttempts(int maxReconnectAttempts) {
+        this.maxReconnectAttempts = maxReconnectAttempts;
     }
 
 }

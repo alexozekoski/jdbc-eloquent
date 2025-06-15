@@ -16,6 +16,7 @@ import java.io.InputStreamReader;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Properties;
 
 /**
  *
@@ -41,14 +42,28 @@ public class PostgreSQL extends Database {
     public PostgreSQL() {
     }
 
-//    @Override
-//    public JsonArray tables() {
-//        return executeAsJsonArray("SELECT table_name as \"name\" FROM information_schema.tables WHERE table_schema='public'");
-//    }
-//    @Override
-//    public JsonArray columns(String tabela) {
-//        return executeAsJsonArray("SELECT column_name as \"name\", data_type as \"type\" FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '" + tabela + "';");
-//    }
+    @Override
+    protected void getConnectProps(String url, Properties props) {
+        if (!props.containsKey("connectTimeout")) {
+            props.put("connectTimeout", getConnectTimeout());
+        }
+        if (!props.containsKey("socketTimeout")) {
+            props.put("socketTimeout", getSocketTimeout());
+        }
+        if (!props.containsKey("loginTimeout")) {
+            props.put("loginTimeout", getLoginTimeout());
+        }
+        if (!props.containsKey("applicationName") && getApplicationName() != null) {
+            props.put("ApplicationName", getApplicationName());
+        }
+        super.getConnectProps(url, props);
+    }
+
+    @Override
+    protected String getConnectUrl(String url, Properties props) {
+        return url + "?" + ("socketTimeout=" + getSocketTimeout() + "&connectTimeout=" + getConnectTimeout());
+    }
+
     @Override
     public MigrationType getMigrationType() {
         return MIGRATION_TYPE;
@@ -91,11 +106,11 @@ public class PostgreSQL extends Database {
 
     @Override
     public long length() {
-        JsonArray array = executeAsJson("SELECT pg_database_size('" + getDatabase() + "')");
+        JsonArray array = executeAsJson("SELECT pg_database_size(?)", getDatabase());
         if (array.size() > 0) {
             return array.get(0).getAsJsonObject().get("pg_database_size").getAsLong();
         }
-        return super.length();
+        return -1;
     }
 
     @Override
@@ -105,10 +120,19 @@ public class PostgreSQL extends Database {
 
     @Override
     protected String queryToSqlString(String query, Statement statement, Object... param) {
-        if(PreparedStatement.class.isInstance(statement)){
-            return statement.toString(); 
+        if (PreparedStatement.class.isInstance(statement)) {
+            return statement.toString();
         }
         return super.queryToSqlString(query, statement, param);
+    }
+
+    @Override
+    public Long getNextSequecialId(String table, String column) {
+        JsonArray array = executeAsJson("SELECT nextval(pg_get_serial_sequence(?, ?)) as \"value\"", table, column);
+        if (array.size() > 0) {
+            return array.get(0).getAsJsonObject().get("value").getAsLong();
+        }
+        return null;
     }
 
 }

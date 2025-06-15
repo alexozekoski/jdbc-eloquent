@@ -16,6 +16,7 @@ import github.alexozekoski.database.Database;
 import github.alexozekoski.database.Log;
 import github.alexozekoski.database.query.Query;
 import github.alexozekoski.database.query.QueryModel;
+import github.alexozekoski.database.validation.Validator;
 import java.lang.reflect.Constructor;
 import java.util.Collections;
 import java.util.HashMap;
@@ -110,14 +111,19 @@ public class Model<T extends Model<T>> {
         }
     }
 
-    public static <M extends Model> List<ModelAction> getListeners(Class<M> model) {
+    public static <M extends Model> boolean removeListener(Class<M> model, ModelAction<M> action) {
         synchronized (LISTENERS) {
             List<ModelAction> actions = LISTENERS.get(model);
-            if (actions == null) {
-                actions = Collections.synchronizedList(new ArrayList());
-                LISTENERS.put(model, actions);
+            if (actions != null) {
+                return actions.remove(action);
             }
-            return actions;
+            return false;
+        }
+    }
+
+    public static <M extends Model> List<ModelAction> getListeners(Class<M> model) {
+        synchronized (LISTENERS) {
+            return LISTENERS.get(model);
         }
     }
 
@@ -172,13 +178,16 @@ public class Model<T extends Model<T>> {
         return set(json, false, false, false, !forceFill);
     }
 
-    public T update(JsonObject json) {
-
-        if (set(json, false, true, false, true) != null && update()) {
-            return (T) this;
-        } else {
-            return null;
-        }
+    public void cutOffStringLength(String... columns) {
+        ModelUtil.cutOffStringLength(this, columns);
+    }
+    
+    public long countIfExist(String column, Object value){
+        return query().where(column, value).count();
+    }
+    
+    public boolean checkIfExist(String column, Object value){
+        return countIfExist(column, value) > 0;
     }
 
     public T create(JsonObject json) {
@@ -211,6 +220,7 @@ public class Model<T extends Model<T>> {
     }
 
     public T set(JsonObject json, boolean insert, boolean update, boolean select, boolean fill) {
+        onFill(json);
         try {
             Field[] campos = ModelUtil.getAllColumns(getClass(), insert, update, select, fill, false);
             List<Model> stack = new ArrayList();
@@ -228,7 +238,7 @@ public class Model<T extends Model<T>> {
             Log.printError(e);
             return null;
         }
-        onFill(json);
+
         return (T) this;
     }
 
@@ -270,6 +280,13 @@ public class Model<T extends Model<T>> {
                 return false;
             }
             return false;
+        }
+        return true;
+    }
+
+    public boolean trySave() throws Exception {
+        if (!tryUpdate()) {
+            tryInsert();
         }
         return true;
     }
@@ -328,15 +345,9 @@ public class Model<T extends Model<T>> {
                 query.where(col.value(), ModelUtil.getQuery(this, key, true));
             }
             onDelete();
-//            if (action != null) {
-//                action.onDelete((T) this);
-//            }
             boolean res = query.tryExecuteDelete() > 0;
             if (res) {
                 afterDelete();
-//                if (action != null) {
-//                    action.afterDelete((T) this);
-//                }
             }
             return res;
         } catch (Exception e) {
@@ -351,58 +362,74 @@ public class Model<T extends Model<T>> {
 
     public void onUpdate() {
         List<ModelAction> actions = getListeners();
-        actions.forEach((action) -> {
-            action.onUpdate(this);
-        });
+        if (actions != null) {
+            actions.forEach((action) -> {
+                action.onUpdate(this);
+            });
+        }
     }
 
-    public void onCreate() {
+    public void onInsert() {
         List<ModelAction> actions = getListeners();
-        actions.forEach((action) -> {
-            action.onCreate(this);
-        });
+        if (actions != null) {
+            actions.forEach((action) -> {
+                action.onInsert(this);
+            });
+        }
     }
 
     public void onDelete() {
         List<ModelAction> actions = getListeners();
-        actions.forEach((action) -> {
-            action.onDelete(this);
-        });
+        if (actions != null) {
+            actions.forEach((action) -> {
+                action.onDelete(this);
+            });
+        }
     }
 
     public void onSelect() {
         List<ModelAction> actions = getListeners();
-        actions.forEach((action) -> {
-            action.onSelect(this);
-        });
+        if (actions != null) {
+            actions.forEach((action) -> {
+                action.onSelect(this);
+            });
+        }
     }
 
     public void afterSelect() {
         List<ModelAction> actions = getListeners();
-        actions.forEach((action) -> {
-            action.afterSelect(this);
-        });
+        if (actions != null) {
+            actions.forEach((action) -> {
+                action.afterSelect(this);
+            });
+        }
     }
 
     public void afterUpdate() {
         List<ModelAction> actions = getListeners();
-        actions.forEach((action) -> {
-            action.afterUpdate(this);
-        });
+        if (actions != null) {
+            actions.forEach((action) -> {
+                action.afterUpdate(this);
+            });
+        }
     }
 
-    public void afterCreate() {
+    public void afterInsert() {
         List<ModelAction> actions = getListeners();
-        actions.forEach((action) -> {
-            action.afterCreate(this);
-        });
+        if (actions != null) {
+            actions.forEach((action) -> {
+                action.afterInsert(this);
+            });
+        }
     }
 
     public void afterDelete() {
         List<ModelAction> actions = getListeners();
-        actions.forEach((action) -> {
-            action.afterDelete(this);
-        });
+        if (actions != null) {
+            actions.forEach((action) -> {
+                action.afterDelete(this);
+            });
+        }
     }
 
     public Database getDatabase() {
@@ -435,13 +462,6 @@ public class Model<T extends Model<T>> {
         return getDatabase().migrate(this.getClass());
     }
 
-//    public ModelAction<T> getAction() {
-//        return action;
-//    }
-//
-//    public void setAction(ModelAction<T> action) {
-//        this.action = action;
-//    }
     @Override
     public String toString() {
         return toJsonString(true);
@@ -449,6 +469,10 @@ public class Model<T extends Model<T>> {
 
     public Field[] getAllColumns(boolean insert, boolean update, boolean select, boolean fill, boolean validate) {
         return ModelUtil.getAllColumns(this.getClass(), insert, update, select, fill, validate);
+    }
+
+    public void onValidateColumn(Column column, Object value, Validator validator) {
+
     }
 
     public JsonObject validate(String... columns) {

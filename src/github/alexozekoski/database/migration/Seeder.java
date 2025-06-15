@@ -6,13 +6,14 @@
 package github.alexozekoski.database.migration;
 
 import github.alexozekoski.database.Database;
+import java.io.InputStream;
 
 /**
  *
  * @author alexo
  */
 public abstract interface Seeder {
-    
+
     public void onCreateTable(Database database);
 //
 //    public static boolean json(Database database, List<Class<? extends Model>> models, File file) {

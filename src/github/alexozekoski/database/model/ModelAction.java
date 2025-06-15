@@ -13,7 +13,7 @@ import com.google.gson.JsonObject;
  */
 public interface ModelAction<T> {
 
-    public void onCreate(T model);
+    public void onInsert(T model);
 
     public void onUpdate(T model);
 
@@ -25,7 +25,7 @@ public interface ModelAction<T> {
 
     public void afterUpdate(T model);
 
-    public void afterCreate(T model);
+    public void afterInsert(T model);
 
     public void afterDelete(T model);
 

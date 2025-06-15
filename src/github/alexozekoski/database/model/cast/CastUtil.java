@@ -8,6 +8,7 @@ package github.alexozekoski.database.model.cast;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonPrimitive;
+import github.alexozekoski.database.Log;
 import java.sql.Time;
 import java.sql.Timestamp;
 import java.text.ParseException;
@@ -21,15 +22,26 @@ import java.util.TimeZone;
  */
 public class CastUtil {
 
-    public static final String DATE_YYYYMMDDTHHMMSSSSS = "yyyy-MM-dd'T'HH:mm:ss.SSS";
-    public static final String DATE_YYYYMMDDHHMMSS = "yyyy-MM-dd HH:mm:ss";
-    public static final String DATE_YYYYMMDDTHHMM = "yyyy-MM-dd'T'HH:mm";
-    public static final String DATE_YYYYMMDDHHMM = "yyyy-MM-dd HH:mm";
-    public static final String DATE_YYYYMMDD = "yyyy-MM-dd";
-
+    public static final String DATE_JSON = "yyyy-MM-dd'T'HH:mm:ss.SSS";
+    public static final String DATE_SQL = "yyyy-MM-dd HH:mm:ss.SSS";
     public static final String TIME_JSON = "HH:mm";
 
-    public static final String DATE_SQL = "yyyy-MM-dd HH:mm:ss.SSS";
+    private static final String[] FORMATS = {
+        "yyyy-MM-dd'T'HH:mm:ss.SSSX",
+        "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+        "yyyy-MM-dd'T'HH:mm:ss.SSS",
+        "yyyy-MM-dd'T'HH:mm:ssX",
+        "yyyy-MM-dd'T'HH:mm:ssZ",
+        "yyyy-MM-dd'T'HH:mm:ss",
+        "yyyy-MM-dd'T'HH:mm",
+        "yyyy-MM-dd HH:mm:ss.SSS",
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd HH:mm",
+        "yyyy-MM-dd",
+        "dd/MM/yyyy",
+        "MM/dd/yyyy",
+        "yyyy/MM/dd"
+    };
 
     public static JsonElement sqlToJson(Object sqlObject) {
         if (sqlObject == null) {
@@ -55,29 +67,22 @@ public class CastUtil {
         return new java.sql.Date(time);
     }
 
-    public static Date stringToDateUtil(String jsonDate) throws ParseException {
+    public static Date stringToDateUtil(String jsonDate) {
         if (jsonDate == null) {
             return null;
         }
-        if (jsonDate.isEmpty()) {
-            return null;
+        for (String format : FORMATS) {
+            try {
+                SimpleDateFormat sdf = new SimpleDateFormat(format);
+                return sdf.parse(jsonDate);
+            } catch (ParseException ignored) {
+            }
         }
-        if (jsonDate.length() == 24) {
-            jsonDate = jsonDate.substring(0, 23);
-        }
-        if (jsonDate.length() == 23) {
-            return new SimpleDateFormat(DATE_YYYYMMDDTHHMMSSSSS).parse(jsonDate);
-        }
-        if (jsonDate.length() == 19) {
-            return new SimpleDateFormat(DATE_YYYYMMDDHHMMSS).parse(jsonDate);
-        }
-        if (jsonDate.length() == 10) {
-            return new SimpleDateFormat(DATE_YYYYMMDD).parse(jsonDate);
-        }
-        return jsonDate.contains("T") ? new SimpleDateFormat(DATE_YYYYMMDDTHHMM).parse(jsonDate) : new SimpleDateFormat(DATE_YYYYMMDDHHMM).parse(jsonDate);
+        Log.printWarning(new Exception("Failed parse data " + jsonDate));
+        return null;
     }
 
-    public static Date jsonDateUtil(JsonElement json) throws ParseException {
+    public static Date jsonDateUtil(JsonElement json) {
         if (json == null || json.isJsonNull()) {
             return null;
         }
@@ -87,7 +92,7 @@ public class CastUtil {
         return stringToDateUtil(json.getAsString());
     }
 
-    public static java.sql.Date jsonDate(JsonElement json) throws ParseException {
+    public static java.sql.Date jsonDate(JsonElement json) {
         if (json == null || json.isJsonNull()) {
             return null;
         }
@@ -97,7 +102,7 @@ public class CastUtil {
         return new java.sql.Date(stringToDateUtil(json.getAsString()).getTime());
     }
 
-    public static Timestamp jsonTimestamp(JsonElement json) throws ParseException {
+    public static Timestamp jsonTimestamp(JsonElement json) {
         if (json == null || json.isJsonNull()) {
             return null;
         }
@@ -105,6 +110,10 @@ public class CastUtil {
             return new Timestamp(json.getAsLong());
         }
         return new Timestamp(stringToDateUtil(json.getAsString()).getTime());
+    }
+
+    public static Timestamp stringTimestamp(String date) {
+        return new Timestamp(stringToDateUtil(date).getTime());
     }
 
     public static Time jsonTime(JsonElement json) throws ParseException {
@@ -132,7 +141,8 @@ public class CastUtil {
         if (date == null) {
             return JsonNull.INSTANCE;
         }
-        return new JsonPrimitive(new SimpleDateFormat(DATE_YYYYMMDDTHHMMSSSSS).format(date));
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS");
+        return new JsonPrimitive(sdf.format(date));
     }
 
     public static Date toDateUtil(Object sqlvalue) throws ParseException {
@@ -211,33 +221,4 @@ public class CastUtil {
         return null;
     }
 
-//    public static Class primitiveToObject(Class classe) {
-//        if (classe.isPrimitive()) {
-//            if (classe == long.class) {
-//                return Long.class;
-//            }
-//            if (classe == int.class) {
-//                return Integer.class;
-//            }
-//            if (classe == boolean.class) {
-//                return Boolean.class;
-//            }
-//            if (classe == double.class) {
-//                return Double.class;
-//            }
-//            if (classe == float.class) {
-//                return Float.class;
-//            }
-//            if (classe == byte.class) {
-//                return Byte.class;
-//            }
-//            if (classe == char.class) {
-//                return Character.class;
-//            }
-//            if (classe == short.class) {
-//                return Short.class;
-//            }
-//        }
-//        return classe;
-//    };
 }

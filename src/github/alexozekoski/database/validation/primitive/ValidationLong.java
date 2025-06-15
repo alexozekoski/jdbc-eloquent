@@ -23,5 +23,9 @@ public @interface ValidationLong {
     public long max() default Long.MAX_VALUE;
 
     public long[] value() default {};
+    
+    public String minVolume() default "";
+    
+    public String maxVolume() default "";
 
 }

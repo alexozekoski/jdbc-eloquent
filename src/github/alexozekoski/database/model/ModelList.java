@@ -27,8 +27,14 @@ public class ModelList<T extends Model<T>> extends ArrayList<T> {
     public ModelList(Class<? extends Model<T>> classe) {
         this.classe = classe;
     }
+    
+    public ModelList(Class<? extends Model<T>> classe, int initialSize) {
+        super(initialSize);
+        this.classe = classe;
+    }
 
     public ModelList(T[] array) {
+        super(array.length);
         this.classe = (Class<? extends Model<T>>) array.getClass().getComponentType();
         for (T item : array) {
             add(item);

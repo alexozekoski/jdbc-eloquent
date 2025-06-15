@@ -42,10 +42,10 @@ public class ModelSerial<T extends ModelSerial<T>> extends Model<T> implements S
     }
 
     @Override
-    public void onCreate() {
+    public void onInsert() {
         created = new Timestamp(new java.util.Date().getTime());
         updated = new Timestamp(new java.util.Date().getTime());
-        super.onCreate();
+        super.onInsert();
     }
 
     @Override
@@ -59,8 +59,24 @@ public class ModelSerial<T extends ModelSerial<T>> extends Model<T> implements S
         if (id == null) {
             return false;
         }
+        if(columns != null && columns.length > 0){
+            boolean hasUpdated = false;
+            for (String col : columns) {
+                if("updated".equals(col)){
+                    hasUpdated = true;
+                    break;
+                }
+            }
+            if(!hasUpdated){
+                String[] newColumns = new String[columns.length + 1];
+                System.arraycopy(columns, 0, newColumns, 0, columns.length);
+                newColumns[newColumns.length - 1] = "updated";
+                columns = newColumns;
+            }
+        }
         return super.update(columns);
     }
+    
 
 //    @Override;
 //    public T get(Long id) {
@@ -86,4 +102,7 @@ public class ModelSerial<T extends ModelSerial<T>> extends Model<T> implements S
         return super.equals(obj) || (getClass().isInstance(obj) && equals(((ModelSerial) obj).id));
     }
 
+    public boolean equalsMemoryReference(Object obj) {
+        return super.equals(obj);
+    }
 }

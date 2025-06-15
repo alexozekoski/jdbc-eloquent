@@ -28,11 +28,10 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  *
@@ -105,6 +104,28 @@ public class ModelUtil {
             }
         }
         return null;
+    }
+
+    public static void cutOffStringLength(Model model, String... columns) {
+        List<String> list = new ArrayList();
+        if (columns != null) {
+            Collections.addAll(list, columns);
+        }
+        Field[] fields = getAllColumns(model.getClass());
+        for (Field field : fields) {
+            Column col = (Column) field.getAnnotation(Column.class);
+            if (col != null && field.getType().equals(String.class) && (list.isEmpty() || list.contains(col.value()))) {
+                String value = (String) getObject(model, field);
+                int size = col.varchar() >= 0 ? col.varchar() : Model.DEFAULT_VARCHAR_SIZE;
+                if (value != null && value.length() > size) {
+                    try {
+                        setField(model, field, value.substring(0, size));
+                    } catch (Exception ex) {
+                        Log.printError(ex);
+                    }
+                }
+            }
+        }
     }
 
     public static Field[] getPrimaryColumns(Class model) {
@@ -246,7 +267,7 @@ public class ModelUtil {
                     return cast.fieldArrayToSql(model, field, classe, cast.jsonArrayToFieldArray(model, stack, field, classe, value), where);
                 }
             } else if (List.class.isAssignableFrom(classe)) {
-                Cast cast = getCast(classe);
+                Cast cast = getCast(field.getAnnotation(Column.class).listType());
                 if (cast != null) {
                     Arrays.asList(cast.fieldArrayToSql(model, field, classe, cast.jsonArrayToFieldArray(model, stack, field, classe, value), where));
                 }
@@ -267,7 +288,21 @@ public class ModelUtil {
         if (field.getType().isPrimitive() && ob == null) {
             return;
         }
-        field.set(model, ob);
+        setField(model, field, ob);
+    }
+
+    public static void setField(Model model, Field field, Object value) throws IllegalArgumentException, IllegalAccessException {
+        boolean accessible = field.canAccess(model);
+        try {
+            field.setAccessible(true);
+            field.set(model, value);
+        } finally {
+            field.setAccessible(accessible);
+        }
+    }
+
+    public static Object getFieldValue(Model model, Field field) throws IllegalArgumentException, IllegalAccessException {
+        return field.get(model);
     }
 
     public static Object getField(Model model, List<Model> stack, Field field, JsonElement value) {
@@ -280,6 +315,7 @@ public class ModelUtil {
                     return cast.jsonArrayToFieldArray(model, stack, field, classe, value);
                 }
             } else if (List.class.isAssignableFrom(classe)) {
+                classe = field.getAnnotation(Column.class).listType();
                 List list = ModelList.class.isAssignableFrom(classe) ? new ModelList(classe) : new ArrayList();
                 Cast cast = getCast(classe);
                 if (cast != null) {
@@ -289,7 +325,9 @@ public class ModelUtil {
                         for (int i = 0; i < size; i++) {
                             list.add(Array.get(array, i));
                         }
+                        return list;
                     }
+
                 }
             } else {
                 Cast cast = getCast(classe);
@@ -314,7 +352,7 @@ public class ModelUtil {
                     return cast.fieldArrayToSql(model, field, classe, value, where);
                 }
             } else if (List.class.isAssignableFrom(classe)) {
-                Cast cast = getCast(classe);
+                Cast cast = getCast(field.getAnnotation(Column.class).listType());
                 if (cast != null) {
                     return cast.fieldArrayToSql(model, field, classe, value, where);
                 }
@@ -351,11 +389,14 @@ public class ModelUtil {
                             JsonElement value = cast.fieldArrayToJsonArray(model, campo, type, valor);
                             json.add(coluna, value == null ? JsonNull.INSTANCE : value);
                         }
-
                     } else if (List.class.isAssignableFrom(type)) {
                         type = campo.getAnnotation(Column.class).listType();
                         Cast cast = getCast(type);
                         if (cast != null) {
+                            if (valor != null) {
+                                List list = (List) valor;
+                                valor = list.toArray();
+                            }
                             JsonElement value = cast.fieldArrayToJsonArray(model, campo, type, valor);
                             json.add(coluna, value == null ? JsonNull.INSTANCE : value);
                         }
@@ -386,8 +427,13 @@ public class ModelUtil {
                 query.set(coluna, cast.fieldArrayToSql(model, field, classe, value, false));
             }
         } else if (List.class.isAssignableFrom(classe)) {
-            Cast cast = getCast(classe);
+            Cast cast = getCast(col.listType());
             if (cast != null) {
+                if (value != null) {
+                    List list = (List) value;
+                    value = list.toArray((Object[]) Array.newInstance(col.listType(), list.size()));
+
+                }
                 query.set(coluna, cast.fieldArrayToSql(model, field, classe, value, false));
             }
         } else {
@@ -400,12 +446,12 @@ public class ModelUtil {
 
     public static void insert(Model model, String... columns) throws Exception {
         QueryModel query = model.query();
-        model.onCreate();
-//        if (model.getAction() != null) {
-//            model.getAction().onCreate(model);
-//        }
+        model.onInsert();
         Field[] campos = getNormalColumns(model.getClass());
-        List<String> list = columns != null ? Arrays.asList(columns) : new ArrayList();
+        List<String> list = new ArrayList<>();
+        if (columns != null) {
+            Collections.addAll(list, columns);
+        }
         for (Field campo : campos) {
             Column column = campo.getAnnotation(Column.class);
             if ((column.insert() && list.isEmpty()) || list.contains(column.value())) {
@@ -421,17 +467,13 @@ public class ModelUtil {
                 set(query, model, campo, column, value);
             }
         }
-        ResultSet res = query.tryExecuteInsert();
-        try {
+        query.tryExecuteInsert((res) -> {
             if (res.next()) {
                 model.fill(res);
             }
-        } catch (Exception ex) {
-            res.close();
-            throw ex;
-        }
-        res.close();
-        model.afterCreate();
+        });
+
+        model.afterInsert();
 //        if (model.getAction() != null) {
 //            model.getAction().afterCreate(model);
 //        }
@@ -454,15 +496,11 @@ public class ModelUtil {
             Column column = campo.getAnnotation(Column.class);
             query.where(column.value(), campo.get(model));
         }
-        ResultSet res = query.tryExecuteSelect();
-        try {
+        query.tryExecuteSelect((res) -> {
             if (res.next()) {
                 model.fill(res);
             }
-        } catch (Exception ex) {
-            throw ex;
-        }
-        res.close();
+        });
 
     }
 
@@ -470,11 +508,11 @@ public class ModelUtil {
 
         QueryModel query = model.query();
         model.onUpdate();
-//        if (model.getAction() != null) {
-//            model.getAction().onUpdate(model);
-//        }
         Field[] campos = model.getNormalColumns();
-        List<String> list = columns != null ? Arrays.asList(columns) : new ArrayList();
+        List<String> list = new ArrayList();
+        if (columns != null) {
+            Collections.addAll(list, columns);
+        }
         for (Field campo : campos) {
             Column column = campo.getAnnotation(Column.class
             );
@@ -507,13 +545,19 @@ public class ModelUtil {
                 clasee = clasee.getComponentType();
                 Cast cast = getCast(clasee);
                 if (cast != null) {
-                    field.set(model, cast.sqlToFieldArray(model, stack, field, clasee, value));
+                    setField(model, field, cast.sqlToFieldArray(model, stack, field, clasee, value));
                 }
-            } else if (clasee.isArray()) {
-                clasee = clasee.getComponentType();
+            } else if (List.class.isAssignableFrom(clasee)) {
+                clasee = field.getAnnotation(Column.class).listType();
                 Cast cast = getCast(clasee);
                 if (cast != null) {
-                    field.set(model, cast.sqlToFieldArray(model, stack, field, clasee, value));
+                    Object d = cast.sqlToFieldArray(model, stack, field, clasee, value);
+                    if (d != null) {
+                        List list = new ArrayList();
+                        Collections.addAll(list, (Object[]) d);
+                        d = list;
+                    }
+                    setField(model, field, d);
                 }
             } else {
 
@@ -522,10 +566,10 @@ public class ModelUtil {
                     Object val = cast.sqlToField(model, stack, field, clasee, value);
                     if (primitive) {
                         if (val != null) {
-                            field.set(model, val);
+                            setField(model, field, val);
                         }
                     } else {
-                        field.set(model, val);
+                        setField(model, field, val);
                     }
                 }
             }
@@ -578,8 +622,13 @@ public class ModelUtil {
         return hash;
     }
 
-    public static Object getObject(Model model, Field field) throws IllegalArgumentException, IllegalAccessException {
-        return field.get(model);
+    public static Object getObject(Model model, Field field) {
+        try {
+            return field.get(model);
+        } catch (Exception ex) {
+            Log.printError(ex);
+        }
+        return null;
     }
 
     public static String getTable(Class classe) {

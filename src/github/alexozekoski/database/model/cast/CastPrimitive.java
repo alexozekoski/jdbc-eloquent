@@ -14,6 +14,8 @@ import github.alexozekoski.database.Log;
 import github.alexozekoski.database.model.Model;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -52,14 +54,15 @@ public class CastPrimitive implements Cast {
         if (arrayValues == null) {
             return null;
         }
-        if (List.class.isAssignableFrom(fieldType)) {
-            List list = (List) arrayValues;
-            JsonArray array = new JsonArray(list.size());
-            for (Object value : list) {
-                array.add(fieldToJson(model, field, fieldType, value));
-            }
-            return array;
-        }
+//        if (List.class.isAssignableFrom(fieldType)) {
+//            
+//            List list = (List) arrayValues;
+//            JsonArray array = new JsonArray(list.size());
+//            for (Object value : list) {
+//                array.add(fieldToJson(model, field, fieldType, value));
+//            }
+//            return array;
+//        }
         int length = Array.getLength(arrayValues);
         JsonArray array = new JsonArray(length);
         for (int i = 0; i < length; i++) {

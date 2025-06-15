@@ -23,7 +23,15 @@ import java.util.TreeMap;
  *
  * @author alexo
  */
-public abstract interface SeederUtil {
+public abstract class SeederUtil {
+
+    public static Class DEFAULT_SEEDER_CLASS_PACKAGE = null;
+
+    public static String DEFAULT_SEEDER_PATH = "";
+
+    public static InputStream getResourceAsStream(String file) {
+        return DEFAULT_SEEDER_CLASS_PACKAGE.getResourceAsStream(DEFAULT_SEEDER_PATH + file);
+    }
 
     public static boolean json(Database database, List<Class<? extends Model>> models, File file) {
         return json(database, models, file, false);

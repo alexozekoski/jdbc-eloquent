@@ -14,9 +14,13 @@ import com.google.gson.JsonObject;
  */
 public class Invalid {
 
-    public static final int CODE_MIN_SIZE = 10;
+    public static final int CODE_MIN_LENGTH = 14;
 
-    public static final int CODE_MAX_SIZE = 11;
+    public static final int CODE_MAX_LENGTH = 15;
+
+    public static final int CODE_MIN_VALUE = 10;
+
+    public static final int CODE_MAX_VALUE = 11;
 
     public static final int CODE_INVALID_VALUE = 12;
 
@@ -32,7 +36,7 @@ public class Invalid {
 
     public static Invalid NOTNULL = new Invalid(CODE_REQUIRED, "Required");
 
-    public static Invalid MAX_STRING = new Invalid(CODE_MAX_STRING, "Max size");
+    public static Invalid MAX_STRING = new Invalid(CODE_MAX_STRING, "Max length");
 
     public static Invalid UNIQUE = new Invalid(CODE_UNIQUE, "Already exists");
 

@@ -48,67 +48,50 @@ public class QueryModel<M extends Model<M>> extends Query<QueryModel<M>> {
         return null;
     }
 
-    public ModelList<M> tryGet() throws IllegalAccessException, IllegalArgumentException, SQLException {
+    public ModelList<M> get(ModelList<M> list) {
+        try {
+            return tryGet(list);
+        } catch (Exception ex) {
+            Log.printError(ex);
+        }
+        return null;
+    }
+
+    public ModelList<M> tryGet() throws IllegalAccessException, IllegalArgumentException, SQLException, Exception {
         return tryGet(new ModelList(classe));
     }
 
-    public ModelList<M> tryGet(ModelList<M> list) throws IllegalAccessException, IllegalArgumentException, SQLException {
-
-        int pos = 0;
-        ResultSet resultado = null;
-        try {
-            resultado = tryExecuteSelect();
-        } catch (Exception e) {
-            Log.printError(e);
-        }
-        try {
-            while (resultado.next()) {
+    public ModelList<M> tryGet(ModelList<M> list) throws IllegalAccessException, IllegalArgumentException, SQLException, Exception {
+        tryExecuteSelect((resultset) -> {
+            int pos = 0;
+            while (resultset.next()) {
                 boolean novo = !(list.size() < pos);
                 M model = novo ? (M) Model.newInstance(classe) : list.get(pos);
                 model.setDatabase(getDatabase());
                 model.onSelect();
-//                if (model.getAction() != null) {
-//                    model.getAction().onSelect(model);
-//                }
-
-                model.fill(resultado);
+                model.fill(resultset);
                 model.afterSelect();
-//                if (model.getAction() != null) {
-//                    model.getAction().afterSelect(model);
-//                }
                 if (novo) {
                     list.add(model);
                 }
                 pos++;
             }
-        } catch (IllegalAccessException | IllegalArgumentException | SQLException e) {
-            Log.printError(e);
-            try {
-                resultado.close();
-            } catch (Exception ex) {
-                Log.printError(ex);
+            while (pos < list.size()) {
+                list.remove(pos);
             }
-            throw e;
-        }
-        try {
-            resultado.close();
-        } catch (Exception e) {
-            Log.printError(e);
-        }
-        while (pos < list.size()) {
-            list.remove(pos);
-        }
+        });
+
         return list;
     }
 
     @Override
-    public long tryCount() throws SQLException {
+    public long tryCount() throws SQLException, Exception {
         long v = super.tryCount();
         return v;
     }
 
     @Override
-    public long tryCountDistinct(String column) throws SQLException {
+    public long tryCountDistinct(String column) throws SQLException, Exception {
         Field[] fields = ModelUtil.getAllColumns(classe);
         if (canSelectColumn(column, fields) != null) {
             long v = super.tryCountDistinct(column);
@@ -127,7 +110,7 @@ public class QueryModel<M extends Model<M>> extends Query<QueryModel<M>> {
         return list.isEmpty() ? null : list.get(0);
     }
 
-    public M tryFirst() throws IllegalAccessException, IllegalArgumentException, SQLException {
+    public M tryFirst() throws IllegalAccessException, IllegalArgumentException, SQLException, Exception {
         ModelList<M> list = limit(1).tryGet();
         return list.isEmpty() ? null : list.get(0);
     }
@@ -241,11 +224,11 @@ public class QueryModel<M extends Model<M>> extends Query<QueryModel<M>> {
         return forceAndFirst;
     }
 
-    public QueryModel<M> where(JsonObject json, boolean forceFirstAnd) throws IllegalArgumentException, IllegalAccessException {
+    public QueryModel<M> where(JsonObject json) throws IllegalArgumentException, IllegalAccessException {
         try {
             Field[] fields = ModelUtil.getAllColumns(classe);
             List<Model> stack = new ArrayList();
-            stackWhere(fields, stack, json, forceFirstAnd);
+            stackWhere(fields, stack, json, true);
         } catch (Exception e) {
             Log.printError(e);
         }

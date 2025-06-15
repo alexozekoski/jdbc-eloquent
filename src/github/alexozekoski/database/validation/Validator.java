@@ -11,6 +11,7 @@ import com.google.gson.JsonObject;
 import github.alexozekoski.database.Log;
 import github.alexozekoski.database.model.Column;
 import github.alexozekoski.database.model.Model;
+import github.alexozekoski.database.model.ModelSerial;
 import github.alexozekoski.database.model.ModelUtil;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
@@ -25,7 +26,6 @@ import java.util.List;
 public class Validator {
 
     public static final List<Validation> VALIDATIONS = new ArrayList();
-    
 
     static {
         VALIDATIONS.add(new ColumnValidation());
@@ -44,11 +44,35 @@ public class Validator {
             Column column = field.getAnnotation(Column.class);
             String key = column.name().isEmpty() ? column.value() : column.name();
             if (list == null || list.contains(key)) {
-                validator.getInvalids().clear();
-                validator.setField(field);
-                validator.setColumn(column);
-                if (!validator.validate()) {
-                    validation.add(key, validator.toJson());
+                if (column.validate()) {
+                    validator.getInvalids().clear();
+                    validator.setField(field);
+                    validator.setColumn(column);
+
+                    if (!validator.validate()) {
+                        validation.add(key, validator.toJson());
+                        continue;
+                    }
+                    if (Model.class.isAssignableFrom(field.getType())) {
+                        Model subModel = (Model) ModelUtil.getObject(model, field);
+                        if (subModel != null) {
+                            List<String> subList = null;
+                            if (list != null) {
+                                subList = new ArrayList<>(list.size());
+                                for (String klist : list) {
+                                    String nk = key + ".";
+                                    if (klist.startsWith(nk)) {
+                                        String r = klist.replace(nk, "");
+                                        subList.add(r);
+                                    }
+                                }
+                            }
+                            JsonObject valSubmodel = subModel.validate(subList != null ? subList.toArray(new String[subList.size()]) : null);
+                            if (valSubmodel != null) {
+                                validation.add(key, valSubmodel);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -78,8 +102,8 @@ public class Validator {
     public void addInvalid(int code, String message) {
         addInvalid(code, message, null);
     }
-    
-     public void addInvalid(Invalid invalid) {
+
+    public void addInvalid(Invalid invalid) {
         this.invalids.add(invalid);
     }
 
@@ -90,6 +114,7 @@ public class Validator {
     public boolean validate() {
         try {
             Object value = field.get(model);
+
             if (value != null && (value.getClass().isArray() || List.class.isInstance(value))) {
                 if (value.getClass().isArray()) {
                     int length = Array.getLength(value);
@@ -112,7 +137,7 @@ public class Validator {
                     validation.valid(model, field, column, value, this);
                 }
             }
-
+            model.onValidateColumn(getColumn(), value, this);
         } catch (Exception ex) {
             Log.printError(ex);
         }

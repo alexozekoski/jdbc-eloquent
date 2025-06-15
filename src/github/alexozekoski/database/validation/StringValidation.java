@@ -9,8 +9,8 @@ import com.google.gson.JsonPrimitive;
 import github.alexozekoski.database.validation.primitive.ValidationString;
 import github.alexozekoski.database.model.Column;
 import github.alexozekoski.database.model.Model;
-import static github.alexozekoski.database.validation.Invalid.CODE_MAX_SIZE;
-import static github.alexozekoski.database.validation.Invalid.CODE_MIN_SIZE;
+import static github.alexozekoski.database.validation.Invalid.CODE_MAX_LENGTH;
+import static github.alexozekoski.database.validation.Invalid.CODE_MIN_LENGTH;
 import static github.alexozekoski.database.validation.Invalid.INVALID_VALUE;
 import static github.alexozekoski.database.validation.Invalid.NOT_EXISTS;
 import java.lang.reflect.Field;
@@ -29,11 +29,11 @@ public class StringValidation implements Validation {
         }
         String string = (String) value;
         if (vs.min() > 0 && string.length() < vs.min()) {
-            validator.addInvalid(CODE_MIN_SIZE, "Min size " + vs.min(), new JsonPrimitive(vs.min()));
+            validator.addInvalid(CODE_MIN_LENGTH, "Min length " + vs.min(), new JsonPrimitive(vs.min()));
         }
 
         if (vs.max() > 0 && string.length() > vs.max()) {
-            validator.addInvalid(CODE_MAX_SIZE, "Max size " + vs.max(), new JsonPrimitive(vs.max()));
+            validator.addInvalid(CODE_MAX_LENGTH, "Max length " + vs.max(), new JsonPrimitive(vs.max()));
         }
 
         if (vs.regexp().length != 0 && !matches(string, vs.regexp())) {

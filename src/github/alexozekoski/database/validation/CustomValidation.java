@@ -23,7 +23,7 @@ public class CustomValidation implements Validation{
         if(vc != null){
             for (Class<? extends Validation> val : vc.value()) {
                 try {
-                    Validation validation = val.newInstance();
+                    Validation validation = val.getDeclaredConstructor().newInstance();
                     validation.valid(model, field, column, value, validator);
                 } catch (Exception ex) {
                    Log.printError(ex);

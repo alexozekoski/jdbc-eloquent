@@ -39,7 +39,7 @@ public class CastString extends CastPrimitive {
         if (value.isJsonNull()) {
             return null;
         }
-        return value.getAsString();
+        return value.isJsonPrimitive() && value.getAsJsonPrimitive().isString() ? value.getAsString() : value.toString();
     }
 
     @Override
@@ -48,7 +48,7 @@ public class CastString extends CastPrimitive {
         if (column.text()) {
             return database.getMigrationType().text();
         }
-        return arrayOrList(field, database.getMigrationType().varchar(column.varchar()> 0 ? column.varchar() : Model.DEFAULT_VARCHAR_SIZE), database);
+        return arrayOrList(field, database.getMigrationType().varchar(column.varchar() > 0 ? column.varchar() : Model.DEFAULT_VARCHAR_SIZE), database);
     }
 
 }
